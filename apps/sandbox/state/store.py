@@ -53,6 +53,8 @@ class Sandbox:
         if type(expected_version) is not int or current.version != expected_version:
             raise StateVersionMismatch("state version changed before commit")
         result = transition(current, action)
+        if result == current:
+            return current
         changed = db.execute(
             "UPDATE sandbox_state SET snapshot = ? WHERE id = 1 AND snapshot = ?",
             (encode_state(result), encode_state(current)),

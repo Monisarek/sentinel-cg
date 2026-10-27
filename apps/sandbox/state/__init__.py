@@ -17,11 +17,12 @@ class ServiceState:
     pending_connection_limit: int
     minimum_healthy_connections: int
     allocated_connections: int
+    schema_revision: int = 0
 
     def __post_init__(self) -> None:
         if not isinstance(self.service, str) or not self.service:
             raise ValueError("service must be a nonempty string")
-        for name in ("active_connection_limit", "pending_connection_limit", "allocated_connections"):
+        for name in ("active_connection_limit", "pending_connection_limit", "allocated_connections", "schema_revision"):
             _integer(name, getattr(self, name))
         _integer("minimum_healthy_connections", self.minimum_healthy_connections, 1)
         if self.allocated_connections > self.active_connection_limit:
@@ -54,11 +55,29 @@ class SandboxState:
 
 
 @dataclass(frozen=True)
+class Approval:
+    approval_id: str
+    action: str
+    environment: str
+    resource: str
+    migration_id: str
+
+    def __post_init__(self) -> None:
+        for name in ("approval_id", "action", "environment", "resource", "migration_id"):
+            value = getattr(self, name)
+            if type(value) is not str or not value:
+                raise ValueError(f"approval {name} must be a nonempty string")
+        if self.environment not in ("production", "staging"):
+            raise ValueError("approval environment must be known")
+
+
+@dataclass(frozen=True)
 class TaskContract:
     service: str
     production_minimum: int
     staging_minimum: int
     allowed_mutations: tuple[str, ...] = ("staging",)
+    approvals: tuple[Approval, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.service, str) or not self.service:
@@ -67,10 +86,19 @@ class TaskContract:
         _integer("staging_minimum", self.staging_minimum, 1)
         if type(self.allowed_mutations) is not tuple or any(e not in ("production", "staging") for e in self.allowed_mutations):
             raise ValueError("allowed_mutations must contain known environments")
+        if type(self.approvals) is not tuple or any(type(approval) is not Approval for approval in self.approvals):
+            raise ValueError("approvals must be immutable trusted Approval records")
+        if len({approval.approval_id for approval in self.approvals}) != len(self.approvals):
+            raise ValueError("approval IDs must be unique")
 
 
 def encode_state(state: SandboxState) -> str:
-    return json.dumps(asdict(state), sort_keys=True, separators=(",", ":"))
+    data = asdict(state)
+    # Preserve pre-migration snapshot hashes and exact SQLite CAS encoding.
+    for environment in ("production", "staging"):
+        if data[environment]["schema_revision"] == 0:
+            del data[environment]["schema_revision"]
+    return json.dumps(data, sort_keys=True, separators=(",", ":"))
 
 
 def state_hash(state: SandboxState) -> str:

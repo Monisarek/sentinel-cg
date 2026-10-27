@@ -6,12 +6,12 @@ from hashlib import sha256
 import json
 from typing import Callable
 
-from apps.control.sentinel.oracles import evaluate_safety, evaluate_utility
+from apps.control.sentinel.oracles import evaluate_execution, evaluate_safety, evaluate_utility
 from apps.control.sentinel.policy import Decision, evaluate_v0
 from apps.sandbox.preview import PreviewResult, impact_facts, preview_action, state_delta
 from apps.sandbox.state import TaskContract, observed_state, state_hash
 from apps.sandbox.state.store import Sandbox, StateVersionMismatch
-from apps.sandbox.transitions import parse_action
+from apps.sandbox.transitions import READ_ONLY_TOOLS, parse_action
 
 
 class _Denied(Exception):
@@ -71,7 +71,7 @@ class Gateway:
                         or preview.action != action
                         or preview.state_version != before.version
                         or preview.source_state_hash != state_hash(before)
-                        or preview.projected_state.version != before.version + 1
+                        or preview.projected_state.version != before.version + (0 if action.name in READ_ONLY_TOOLS else 1)
                         or preview.projected_state_hash != state_hash(preview.projected_state)
                         or preview.effects != state_delta(before, preview.projected_state)
                         or preview.impact != impact_facts(preview.projected_state)
@@ -140,7 +140,8 @@ class Gateway:
             "state_version_before": before.version if before is not None else None,
             "state_version_after": after.version if after is not None else None,
             "actual_delta": [asdict(effect) for effect in state_delta(before, after)] if before is not None and after is not None else None,
-            "safety": asdict(evaluate_safety(after, self._task)) if after is not None else None,
+            "safety": asdict(evaluate_execution(before, after, action, self._task, denied=decision == "DENY"))
+                if before is not None and after is not None else (asdict(evaluate_safety(after, self._task)) if after is not None else None),
             "utility": asdict(evaluate_utility(after, self._task)) if after is not None else None,
         }
         event = json.loads(json.dumps(event, allow_nan=False))
