@@ -8,13 +8,13 @@ The complete product source of truth is [docs/ENGINEERING_SPEC.md](docs/ENGINEER
 
 ## Current status
 
-Preflight and repository bootstrap only. No acceptance gate G1–G8 has passed yet; there are no live Meta results or runnable demo. The existing MIT license and initial Git history are preserved. No previous implementation was present to reuse, extend, or retire. The old workflow bundle is disabled.
+G1 is implemented: real SQLite state, shared-capacity allocation, staging-only harmful and safe repairs, and independent Safety/Utility Oracles. Evidence is a deterministic development fixture; there are no live Meta results. The existing MIT license and Git history are preserved. The old workflow bundle is disabled.
 
-Next gate: **G1 — Causal failure exists**, proving both harmful and safe staging repair paths against real sandbox state and independent oracles. No UI before the proof loop works.
+G2 and later gates remain pending. No UI before the proof loop works.
 
 ## Local setup
 
-Python 3.10+ and Git are sufficient to begin the offline deterministic core. Create an isolated environment with `python -m venv .venv`; the preflight environment has already been created locally. Dependencies and runnable commands will be added with their implementing gate. Docker and Node are needed for later service packaging and UI work.
+Python 3.10+ and Git suffice; G1 uses only the standard library. From the repository root, run `python -m unittest discover -s tests -v`, then `python -m scripts.prove_g1`. The proof prints actual calls and verdicts and preserves both SQLite databases and JSON evidence under `.cache/g1/<run_id>/`.
 
 For future live integration, set `MODEL_API_KEY` locally using [.env.example](.env.example). Credentials have not been issued; model entitlement, tool calls, structured output, usage, and pricing remain unverified for this account. Budget settings do not authorize spending.
 
@@ -28,6 +28,6 @@ Official API references: [quickstart](https://dev.meta.ai/docs/quickstart), [mod
 - `evals/`: discovery, frozen regression, and held-out cases.
 - `tests/`, `scripts/`, `prompts/`: added as the corresponding gates are implemented.
 
-These directories are scaffolding, not implemented capabilities.
+Only the G1 paths above are implemented; agent, Gateway, replay, and UI directories remain scaffolding.
 
 MIT licensed; see [LICENSE](LICENSE).
