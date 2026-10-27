@@ -1,4 +1,4 @@
-<!-- Imported from Engineering Specification.docx; SHA-256: 3b50a08cb4853be52558ca91dbb669b619613ee28f8c27f71c477549a3bab1b3. Product requirements supplied by the user. -->
+<!-- Imported from Engineering Specification.docx; SHA-256: 3b50a08cb4853be52558ca91dbb669b619613ee28f8c27f71c477549a3bab1b3. Product requirements supplied by the user. Public terminology aligned with the English-Only Repository Policy. -->
 
 # SENTINEL-CG 2.0 — Engineering Specification
 
@@ -92,7 +92,7 @@ Use the four equally weighted judging criteria reported in the organizer FAQ:
 | --- | --- | --- |
 | Impact | 25% | AI agents can cause damaging indirect effects even when their direct tool calls are permitted; SENTINEL preserves autonomy while reducing that risk |
 | Use of Meta AI Tooling | 25% | Muse Spark genuinely discovers an unexpected multi-step counterexample; a Meta model genuinely synthesizes a candidate repair |
-| Technical Depth & Execution | 25% | Stateful causal simulation, independent enforcement, constrained policy synthesis, counterfactual replay, deterministic oracles, held-out generalization |
+| Technical Depth & Execution | 25% | Deterministic Sandbox Execution with stateful causal transitions, independent enforcement, constrained policy synthesis, counterfactual replay, deterministic oracles, held-out generalization |
 | Demo Quality | 25% | In seconds, the judge sees a real production failure, the cause, the verified repair, and the same actions under a safer policy |
 
 Also optimize for the Indie Track emphasis on:
@@ -1876,7 +1876,7 @@ Fix the live core.
 
 - multi-tenant SaaS;
 
-- additional simulation worlds;
+- additional deterministic sandbox environments;
 
 - 3D graphics;
 
