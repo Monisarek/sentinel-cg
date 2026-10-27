@@ -2,41 +2,22 @@
 
 from dataclasses import asdict
 
-from apps.control.sentinel.oracles import evaluate_safety, evaluate_workflow
-from apps.control.sentinel.policy import evaluate_v0
-from apps.sandbox.state import SandboxState, TaskContract, state_hash
+from apps.control.sentinel.gateway import Gateway
+from apps.control.sentinel.oracles import evaluate_workflow
+from apps.sandbox.state import TaskContract, observed_state, state_hash
 from apps.sandbox.state.store import Sandbox
-
-
-def observed_state(state: SandboxState) -> dict:
-    data = asdict(state)
-    data["production"]["health"] = state.production.health
-    data["staging"]["health"] = state.staging.health
-    return data
 
 
 def run_fixture(sandbox: Sandbox, task: TaskContract, proposals: list[dict]) -> dict:
     initial = sandbox.read()
     trace = []
     history = [initial]
+    gateway = Gateway(sandbox, task)
     for proposal in proposals:
-        before = sandbox.read()
-        decision = evaluate_v0(proposal, task)
-        if decision.allowed:
-            sandbox.apply(decision.action)
-        # Reopen SQLite: verdicts use persisted state, never a predicted outcome.
+        event = gateway.execute(proposal)
         after = Sandbox(sandbox.path).read()
         history.append(after)
-        trace.append({
-            "proposal": proposal,
-            "decision": "ALLOW" if decision.allowed else "DENY",
-            "reason": decision.reason,
-            "before": observed_state(before),
-            "after": observed_state(after),
-            "before_hash": state_hash(before),
-            "after_hash": state_hash(after),
-            "safety": asdict(evaluate_safety(after, task)),
-        })
+        trace.append(event)
     final = Sandbox(sandbox.path).read()
     safety, utility = evaluate_workflow(history, task)
     return {

@@ -8,13 +8,13 @@ The complete product source of truth is [docs/ENGINEERING_SPEC.md](docs/ENGINEER
 
 ## Current status
 
-G1 is implemented: real SQLite state, shared-capacity allocation, staging-only harmful and safe repairs, and independent Safety/Utility Oracles. Evidence is a deterministic development fixture; there are no live Meta results. The existing MIT license and Git history are preserved. The old workflow bundle is disabled.
+G1/G2 are implemented: real SQLite state, shared-capacity allocation, independent Safety/Utility Oracles, and a versioned Execution Gateway with deterministic preview, atomic commit and verifiable event traces. Evidence is a deterministic development fixture; there are no live Meta results. The existing MIT license and Git history are preserved. The old workflow bundle is disabled.
 
-G2 and later gates remain pending. No UI before the proof loop works.
+G3 and later gates remain pending. No UI before the proof loop works.
 
 ## Local setup
 
-Python 3.10+ and Git suffice; G1 uses only the standard library. From the repository root, run `python -m unittest discover -s tests -v`, then `python -m scripts.prove_g1`. The proof prints actual calls and verdicts and preserves both SQLite databases and JSON evidence under `.cache/g1/<run_id>/`.
+Python 3.10+ and Git suffice; G1/G2 use only the standard library. Run `python -m unittest discover -s tests -v`, then `python -m scripts.prove_g1` or `python -m scripts.prove_g2`. Proofs preserve actual SQLite databases, Gateway traces and JSON evidence under `.cache/g1/` and `.cache/g2/`.
 
 For future live integration, set `MODEL_API_KEY` locally using [.env.example](.env.example). Credentials have not been issued; model entitlement, tool calls, structured output, usage, and pricing remain unverified for this account. Budget settings do not authorize spending.
 
@@ -28,6 +28,6 @@ Official API references: [quickstart](https://dev.meta.ai/docs/quickstart), [mod
 - `evals/`: discovery, frozen regression, and held-out cases.
 - `tests/`, `scripts/`, `prompts/`: added as the corresponding gates are implemented.
 
-Only the G1 paths above are implemented; agent, Gateway, replay, and UI directories remain scaffolding.
+Only G1/G2 are implemented; agent, replay, and UI directories remain scaffolding.
 
 MIT licensed; see [LICENSE](LICENSE).

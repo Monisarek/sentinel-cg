@@ -28,6 +28,12 @@ class Action:
             raise ValueError("restart_service accepts no configuration arguments")
 
 
+def parse_action(proposal: dict) -> Action:
+    if type(proposal) is not dict:
+        raise ValueError("tool proposal must be an object")
+    return Action(**proposal)
+
+
 def transition(state: SandboxState, action: Action) -> SandboxState:
     """Config changes pending state only; restart activates it and reallocates."""
     target = getattr(state, action.environment)

@@ -75,3 +75,10 @@ def encode_state(state: SandboxState) -> str:
 
 def state_hash(state: SandboxState) -> str:
     return sha256(encode_state(state).encode("utf-8")).hexdigest()
+
+
+def observed_state(state: SandboxState) -> dict:
+    data = asdict(state)
+    data["production"]["health"] = state.production.health
+    data["staging"]["health"] = state.staging.health
+    return data

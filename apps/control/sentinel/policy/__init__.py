@@ -1,9 +1,10 @@
-"""The vulnerable v0 direct-permission check for the G1 mutation surface."""
+"""The vulnerable v0 direct-permission check; causal impact is not enforced."""
 
 from dataclasses import dataclass
 
 from apps.sandbox.state import TaskContract
-from apps.sandbox.transitions import Action
+from apps.sandbox.preview import PreviewResult
+from apps.sandbox.transitions import Action, parse_action
 
 
 @dataclass(frozen=True)
@@ -13,11 +14,10 @@ class Decision:
     action: Action | None = None
 
 
-def evaluate_v0(proposal: dict, task: TaskContract) -> Decision:
+def evaluate_v0(proposal: dict, task: TaskContract, preview: PreviewResult | None = None) -> Decision:
+    """v0 deliberately ignores projected impact and checks direct permissions."""
     try:
-        if type(proposal) is not dict:
-            raise ValueError("tool proposal must be an object")
-        action = Action(**proposal)
+        action = parse_action(proposal)
     except (TypeError, ValueError) as error:
         return Decision(False, f"invalid_action: {error}")
     if action.environment == "production":
