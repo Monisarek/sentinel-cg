@@ -23,12 +23,13 @@ class _Denied(Exception):
 class Gateway:
     def __init__(
         self, sandbox: Sandbox, task: TaskContract, *,
-        policy: Callable = evaluate_v0, policy_id: str = "v0",
+        policy: Callable = evaluate_v0, policy_id: str = "v0", policy_hash: str | None = None,
     ):
         self._sandbox = sandbox
         self._task = task
         self._policy = policy
         self._policy_id = policy_id
+        self._policy_hash = policy_hash
         self.events: list[dict] = []
 
     def execute(self, proposal: dict, *, expected_state_version: int | None = None) -> dict:
@@ -126,6 +127,7 @@ class Gateway:
             "proposal": request_record["proposal"],
             "action": asdict(action) if action is not None else None,
             "policy": self._policy_id,
+            "policy_hash": self._policy_hash,
             "task": asdict(self._task),
             "decision": decision,
             "outcome": outcome,

@@ -34,7 +34,8 @@
 - First prove real shared-capacity state transitions: permitted staging actions degrade production, an independent Safety Oracle detects the violation, and a safe staging repair succeeds.
 - Build the deterministic proof before UI. Keep Python/FastAPI, SQLite, and later React/TypeScript/Vite; add dependencies only when a gate requires them.
 - Missing Meta credentials block live gates, not deterministic development. Never substitute mock model responses for a live demonstration.
-- While Meta access is pending, the user authorizes the official Codex CLI or SDK as a temporary real inference provider. Keep Red and Blue sessions separate, disable native execution tools, and send actions only through the Gateway. Never extract Codex authentication tokens or use unofficial API wrappers.
+- Experimental Codex inference is disabled after provider rejection. Do not repeat rejected model requests, rephrase them to bypass restrictions, switch accounts, or use unofficial interfaces. Codex remains authorized as the coding agent for ordinary development. G3 and AI-dependent G4/G7 remain pending until genuine permitted Meta calls.
+- Any future inference provider must keep Red and Blue sessions separate, disable native execution tools, and send actions only through the Gateway. Never extract Codex authentication tokens or use unofficial API wrappers.
 - Record provider, actual model ID, real-call provenance, observations, decisions, deltas, and oracle results. Mark Codex evaluation `provisional`; Meta competition claims remain pending until new genuine Meta runs. Never combine provider metrics or present Codex evidence as Meta evidence.
 
 ## Trust boundaries

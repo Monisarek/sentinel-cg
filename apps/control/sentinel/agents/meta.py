@@ -9,7 +9,10 @@ import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from apps.control.sentinel.agents.contracts import ACTION_SCHEMA, AgentContext, AgentDecision, ToolObservation, ProviderError, parse_decision
+from apps.control.sentinel.agents.contracts import (
+    ACTION_SCHEMA, AgentContext, AgentDecision, ToolObservation, InferenceSchemaError,
+    ProviderBlocked, ProviderError, ProviderTransportError, parse_decision,
+)
 from apps.control.sentinel.policy.dsl import CandidatePolicyPatch, validate_patch
 from apps.sandbox.transitions import parse_action
 
@@ -50,7 +53,7 @@ class _MetaClient:
     def __init__(self, role: str, model_id: str, timeout_seconds: int, max_completion_tokens: int):
         self._key = os.getenv("MODEL_API_KEY", "").strip()
         if not self._key:
-            raise ProviderError("Meta API access requires MODEL_API_KEY; no fallback provider was used")
+            raise ProviderBlocked("Meta API access requires MODEL_API_KEY; no fallback provider was used")
         if type(model_id) is not str or not model_id.strip():
             raise ValueError("Meta model_id must be a nonempty string")
         if any(type(value) is not int or value < 1 for value in (timeout_seconds, max_completion_tokens)):
@@ -77,11 +80,12 @@ class _MetaClient:
                 raise ValueError("response size limit exceeded")
             data = json.loads(raw.decode("utf-8"))
         except HTTPError as error:
-            raise ProviderError(f"Meta API request failed with HTTP {error.code}") from None
+            failure = ProviderBlocked if error.code in (401, 403, 429) else ProviderTransportError
+            raise failure(f"Meta API request failed with HTTP {error.code}") from None
         except (URLError, OSError, TimeoutError) as error:
-            raise ProviderError("Meta API transport failed; no fallback provider was used") from None
+            raise ProviderTransportError("Meta API transport failed; no fallback provider was used") from None
         except (ValueError, UnicodeError) as error:
-            raise ProviderError("Meta API returned invalid JSON") from None
+            raise InferenceSchemaError("Meta API returned invalid JSON") from None
         if self._key in json.dumps(data, sort_keys=True):
             raise ProviderError("Meta response contained credential material and was not recorded")
         try:
@@ -93,7 +97,7 @@ class _MetaClient:
             if type(usage) is not dict or any(type(usage.get(name)) is not int or usage[name] < 0 for name in ("prompt_tokens", "completion_tokens")):
                 raise ValueError("missing usage accounting")
         except (ValueError, TypeError) as error:
-            raise ProviderError("Meta response lacks valid model, response ID, or usage metadata") from None
+            raise InferenceSchemaError("Meta response lacks valid model, response ID, or usage metadata") from None
         metadata = {
             "provider": "meta", "evaluation_status": "live", "real_model_call": True,
             "role": self.role, "model_id": data["model"], "requested_model_id": self.model_id,
@@ -109,14 +113,18 @@ class _MetaClient:
 def _message(data: dict) -> dict:
     try:
         choices = data["choices"]
-        if type(choices) is not list or len(choices) != 1 or choices[0].get("finish_reason") in ("length", "content_filter"):
+        if type(choices) is not list or len(choices) != 1 or choices[0].get("finish_reason") == "length":
             raise ValueError("incomplete or ambiguous completion")
+        if choices[0].get("finish_reason") == "content_filter":
+            raise ProviderBlocked("Meta declined the inference request")
         message = choices[0]["message"]
-        if type(message) is not dict or message.get("role") != "assistant" or message.get("refusal"):
+        if type(message) is not dict or message.get("role") != "assistant":
             raise ValueError("invalid or refused assistant response")
+        if message.get("refusal"):
+            raise ProviderBlocked("Meta declined the inference request")
         return message
     except (ValueError, KeyError, TypeError, AttributeError) as error:
-        raise ProviderError("Meta returned an incomplete, refused, or invalid assistant message") from None
+        raise InferenceSchemaError("Meta returned an incomplete, refused, or invalid assistant message") from None
 
 
 class MetaAgentDriver:
@@ -173,7 +181,7 @@ class MetaAgentDriver:
         if calls is None:
             calls = []
         if type(calls) is not list or len(calls) > 1:
-            raise ProviderError("Meta must propose at most one native tool call")
+            raise InferenceSchemaError("Meta must propose at most one native tool call")
         try:
             content = message.get("content")
             if content is not None and type(content) is not str:
@@ -202,7 +210,7 @@ class MetaAgentDriver:
                 decision = parse_decision({"kind": "stop", "action": None, "explanation": content}, metadata)
                 self._stopped = True
         except (ValueError, TypeError, KeyError) as error:
-            raise ProviderError("Meta returned an invalid action or non-English explanation") from None
+            raise InferenceSchemaError("Meta returned an invalid action or non-English explanation") from None
         self._messages.append(deepcopy(message))
         return decision
 
@@ -229,13 +237,13 @@ class MetaPolicySynthesizer:
             data, _ = self._client.complete(messages, response_format=response_format)
             message = _message(data)
             if message.get("tool_calls"):
-                raise ProviderError("Meta policy synthesis cannot execute tool calls")
+                raise InferenceSchemaError("Meta policy synthesis cannot execute tool calls")
             try:
                 patch = validate_patch(json.loads(message["content"]))
                 return patch
             except (ValueError, TypeError, KeyError) as error:
                 if attempt:
-                    raise ProviderError("Meta candidate policy failed validation after one correction") from None
+                    raise InferenceSchemaError("Meta candidate policy failed validation after one correction") from None
                 messages.extend([
                     deepcopy(message),
                     {"role": "user", "content": "Validator feedback: " + str(error) + ". Return one corrected structured patch; no policy has been activated."},

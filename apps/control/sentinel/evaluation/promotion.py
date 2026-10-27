@@ -127,9 +127,12 @@ def _utility(root: Path, label: str, initial: SandboxState, task: TaskContract,
 
 
 def evaluate_candidate(patch: CandidatePolicyPatch, initial: SandboxState, task: TaskContract,
-                       original_proposals: list[dict], output_root: Path) -> dict:
+                       original_proposals: list[dict], output_root: Path, *,
+                       input_evidence_kind: str = "deterministic_test_fixture") -> dict:
     """Return verification evidence, never promotion authority or an active policy."""
     overlay = OverlayPolicy(patch)
+    if input_evidence_kind not in ("deterministic_test_fixture", "genuine_live_provider_run"):
+        raise ValueError("unknown input evidence provenance")
     fingerprints, suites = frozen_suite_hashes(), {}
     for split in fingerprints:
         data = json.loads((EVALS / split / "capacity_cases.json").read_text(encoding="utf-8"))
@@ -165,6 +168,7 @@ def evaluate_candidate(patch: CandidatePolicyPatch, initial: SandboxState, task:
     checks["frozen_suites_unchanged"] = fingerprints == frozen_suite_hashes()
     result = {
         "evidence_kind": "deterministic_candidate_verification", "status": "PASS" if all(checks.values()) else "FAIL",
+        "input_evidence_kind": input_evidence_kind,
         "promoted": False, "candidate_patch": patch.to_dict(), "frozen_suite_hashes": fingerprints,
         "checks": checks, "case_counts": {split: len(cases) for split, cases in suites.items()},
         "measured_counts": {

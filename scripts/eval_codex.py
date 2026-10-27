@@ -1,4 +1,4 @@
-"""Run genuine provisional Codex exploration through the existing Gateway."""
+"""Record the disabled experimental Codex provider without sending model requests."""
 
 import argparse
 import json
@@ -27,6 +27,7 @@ def run(output_root: Path, model_id: str) -> dict:
         "working_tree_dirty": bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=root, text=True).strip()),
         **result,
         "gate": "G3 provisional", "meta_confirmation": "PENDING",
+        "gate_status": "PENDING",
         "status": "PASS" if result["real_model_call"] and result["verified_counterexample"] else "FAIL",
         "evidence_path": str((directory / "evidence.json").resolve()),
     }
@@ -43,6 +44,7 @@ def main() -> int:
     print(json.dumps({key: evidence[key] for key in (
         "run_id", "provider", "evaluation_status", "model_id", "real_model_call", "status",
         "result", "executed_actions", "oracle_verdicts", "final_state", "evidence_path",
+        "inference_status", "error_category", "gate_status", "meta_confirmation",
     )}, indent=2))
     return 0 if evidence["status"] == "PASS" else 1
 

@@ -12,7 +12,9 @@ from urllib.error import HTTPError, URLError
 from contextlib import redirect_stderr, redirect_stdout
 
 from apps.control.sentinel.agents.codex import ProviderError
-from apps.control.sentinel.agents.contracts import AgentContext, ToolObservation
+from apps.control.sentinel.agents.contracts import (
+    AgentContext, ToolObservation, InferenceSchemaError, ProviderBlocked, ProviderTransportError,
+)
 from apps.control.sentinel.agents.meta import API_URL, MetaAgentDriver, MetaPolicySynthesizer
 from apps.control.sentinel.gateway import Gateway
 from apps.control.sentinel.policy.dsl import policy_schema
@@ -71,6 +73,30 @@ class MetaProviderTests(unittest.TestCase):
                 with self.subTest(adapter=adapter.__name__), self.assertRaisesRegex(ProviderError, "MODEL_API_KEY"):
                     adapter()
         self.urlopen.assert_not_called()
+
+    def test_blocked_schema_and_transport_failures_have_distinct_machine_categories(self):
+        failures = (
+            (HTTPError(API_URL, 403, "Unit-fixture provider refusal", {}, BytesIO()), ProviderBlocked, "PROVIDER_BLOCKED"),
+            (URLError("Unit-fixture transport failure"), ProviderTransportError, "PROVIDER_TRANSPORT_ERROR"),
+        )
+        for failure, expected_type, category in failures:
+            with self.subTest(category=category):
+                self.urlopen.side_effect = failure
+                driver = MetaAgentDriver()
+                with self.assertRaises(expected_type) as caught:
+                    driver.next_action(self.context, [])
+                self.assertEqual(caught.exception.error_category, category)
+                self.assertEqual(driver.calls, [])
+        self.urlopen.side_effect = None
+        self.urlopen.return_value = BytesIO(b"not JSON")
+        with self.assertRaises(InferenceSchemaError) as caught:
+            MetaAgentDriver().next_action(self.context, [])
+        self.assertEqual(caught.exception.error_category, "SCHEMA_ERROR")
+        refused = completion({"role": "assistant", "content": None, "refusal": "Unit-fixture refusal"})
+        self.urlopen.return_value = http_response(refused)
+        with self.assertRaises(ProviderBlocked) as caught:
+            MetaAgentDriver().next_action(self.context, [])
+        self.assertEqual(caught.exception.error_category, "PROVIDER_BLOCKED")
 
     def test_red_native_requests_preserve_actual_call_and_tool_result_history(self):
         first_message = tool_message()

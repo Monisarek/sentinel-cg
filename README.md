@@ -10,15 +10,21 @@ The complete product source of truth is [docs/ENGINEERING_SPEC.md](docs/ENGINEER
 
 G1/G2 are implemented: real SQLite state, shared-capacity allocation, independent Safety/Utility Oracles, and a versioned Execution Gateway with deterministic preview, atomic commit and verifiable event traces. Evidence is a deterministic development fixture; there are no live Meta results. The existing MIT license and Git history are preserved. The old workflow bundle is disabled.
 
-G3 and later gates remain pending. Temporary Codex and Meta adapters, the restricted deny-only DSL, exact scoped approvals, and deterministic candidate verification are implemented and unit tested. A genuine provisional Codex run made two staging configuration changes, then received a cybersecurity access rejection from the provider. It found no verified counterexample; Blue synthesis, live promotion, and adaptive re-attack have not completed. The recorded [failed run](evals/evidence/codex-blocked.json) is Codex evidence, with Meta confirmation pending. No UI before the proof loop works.
+The deterministic G5 verification and controlled promotion path, G6 Safety Time Machine, and a minimal Evidence UI are implemented. The offline cycle rejects overblocking, verifies a narrow candidate against unchanged frozen regression and held-out suites, activates immutable v1, and executes the same recorded actions in two independent SQLite databases. A separate safe staging repair completes after promotion.
+
+Offline inputs and results are labeled `deterministic_test_fixture`: the counterexample and patch are handcrafted, and no model is called. G3 and the AI-dependent parts of G4/G7 remain PENDING. The [historical failed Codex run](evals/evidence/codex-blocked.json) found no verified counterexample; its next inference request was rejected for cybersecurity access. Experimental Codex inference is disabled. Ordinary coding-agent development continues.
 
 ## Local setup
 
-Python 3.10+ and Git suffice; G1/G2 use only the standard library. Run `python -m unittest discover -s tests -v`, then `python -m scripts.prove_g1` or `python -m scripts.prove_g2`. Proofs preserve actual SQLite databases, Gateway traces and JSON evidence under `.cache/g1/` and `.cache/g2/`.
+Use Python 3.10+ and Git. G1/G2 and the deterministic proof use the standard library. Install API/test dependencies with `python -m pip install -r requirements-dev.txt`, then run `python -m unittest discover -s tests -v` (including the English-only guard). G1/G2 remain reproducible with `python -m scripts.prove_g1` and `python -m scripts.prove_g2`.
+
+Run `python -m scripts.prove_core` for candidate → independent verification → promotion/rejection → counterfactual replay. Its printed path identifies the complete bundle, immutable policy registry, verification artifacts, and real SQLite databases under `.cache/core/<run_id>/`. The bundle uses JSON/SHA-256; a PASS never establishes Meta-dependent gates. Frozen regression and held-out files must retain their recorded hashes.
+
+For the Evidence UI, use the Node version supported by the pinned Vite dependency (this checkout was tested with Node 22.16). In `apps/web`, run `npm ci --ignore-scripts` and `npm run build`. From the repository root run `python -m scripts.serve_evidence`, then open `http://127.0.0.1:8000`. The UI can start a fresh offline proof and inspect saved states. SSE frames are labeled recorded execution. JSON downloads contain the actual bundle; the API checks bundle, verification, policy, and SQLite state integrity before serving it. See [docs/DEMO.md](docs/DEMO.md) for the truthful three-minute fixture walkthrough.
 
 For future live integration, set `MODEL_API_KEY` locally using [.env.example](.env.example). Credentials have not been issued; model entitlement, tool calls, structured output, usage, and pricing remain unverified for this account. Budget settings do not authorize spending.
 
-The temporary development command is `python -m scripts.eval_codex`; it uses the official installed CLI and existing login, returns a nonzero status when discovery fails, and preserves every run under `.cache/codex/`. Provider refusals stop the run without automatic retries. Do not rerun a rejected experiment until the provider grants the required access. Red and Blue use separate ephemeral sessions with native tools disabled. The CLI process runs as the host user, so this restriction is not complete OS isolation. Codex records the explicitly configured model ID; its JSON event stream does not confirm the service-returned model ID. Meta adapters require `MODEL_API_KEY` and have no substitute provider; paid Meta execution remains pending verified pricing and application-side spending guards.
+`python -m scripts.eval_codex` only records `PROVIDER_BLOCKED` with zero model calls and actions; there is no runtime re-enable flag or alternative transport. Provider blocking, transport failure, schema failure, and sandbox execution failure have separate machine-readable categories. The historical Codex evidence records an explicitly configured model ID without service confirmation and is not Meta evidence. Meta adapters require `MODEL_API_KEY` and have no substitute provider; paid Meta execution remains pending verified pricing and application-side spending guards.
 
 Official API references: [quickstart](https://dev.meta.ai/docs/quickstart), [models](https://dev.meta.ai/docs/models). The documented base URL is `https://api.meta.ai/v1`; configured models are `muse-spark-1.3` and `muse-wonder-1.0`.
 
@@ -26,10 +32,10 @@ Official API references: [quickstart](https://dev.meta.ai/docs/quickstart), [mod
 
 - `apps/sandbox/`: deterministic world, allocator, transitions, preview, and fixtures.
 - `apps/control/sentinel/`: Gateway, policies, independent oracles, evaluation, replay, evidence, agents, and API.
-- `apps/web/`: reserved for the evidence UI after the core works.
+- `apps/web/`: the React/TypeScript/Vite evidence workspace.
 - `evals/`: discovery, frozen regression, and held-out cases.
 - `tests/`, `scripts/`, `prompts/`: added as the corresponding gates are implemented.
 
-Candidate verification uses frozen regression and held-out suites and real isolated SQLite execution. Its tests use explicitly handcrafted patches and establish verifier behavior only. A verification result never activates a candidate. Replay and UI remain pending.
+Only the controlled Promotion Gate can append v1 after independent verification succeeds. Models and HTTP clients have no activation endpoint. SQLite append-only guards protect history from accidental edits; a host process with database-write access remains trusted. G8, the final Meta demonstration, and the core release tag remain pending mandatory live gates.
 
 MIT licensed; see [LICENSE](LICENSE).

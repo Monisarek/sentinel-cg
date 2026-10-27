@@ -115,10 +115,36 @@ class CodexProviderTests(unittest.TestCase):
         with patch("apps.control.sentinel.agents.codex.shutil.which", return_value="C:/official/codex.exe"):
             return CodexStructuredClient(role, timeout_seconds=5)
 
+    def test_disabled_provider_never_launches_a_process(self):
+        client = self.make_client()
+        with patch("apps.control.sentinel.agents.codex.subprocess.run") as process:
+            with self.assertRaisesRegex(ProviderBlocked, "inference is disabled") as caught:
+                client.complete("Deterministic unit fixture; no inference request.", DECISION_SCHEMA)
+            process.assert_not_called()
+        self.assertEqual(caught.exception.error_category, "PROVIDER_BLOCKED")
+        self.assertEqual(client.calls, [])
+
+    def test_disabled_command_preserves_pending_evidence_without_codex_installed(self):
+        from scripts.eval_codex import run
+
+        with TemporaryDirectory() as directory, patch("scripts.eval_codex.subprocess.check_output", side_effect=["unit-fixture-commit", ""]), patch("apps.control.sentinel.agents.codex.shutil.which", return_value=None), patch("apps.control.sentinel.agents.codex.subprocess.run") as process:
+            evidence = run(Path(directory), "unit-fixture-model")
+            process.assert_not_called()
+            persisted = json.loads(Path(evidence["evidence_path"]).read_text(encoding="utf-8"))
+            self.assertEqual(persisted, json.loads(json.dumps(evidence)))
+            self.assertEqual(evidence["inference_status"], "PROVIDER_BLOCKED")
+            self.assertEqual(evidence["error_category"], "PROVIDER_BLOCKED")
+            self.assertEqual(evidence["gate_status"], "PENDING")
+            self.assertEqual(evidence["meta_confirmation"], "PENDING")
+            self.assertEqual(evidence["status"], "FAIL")
+            self.assertFalse(evidence["real_model_call"])
+            self.assertEqual(evidence["policy_decisions"], [])
+            self.assertEqual(evidence["initial_state_hash"], evidence["final_state_hash"])
+
     def test_cli_uses_restricted_configuration_and_separate_empty_directories(self):
         fixture = CliFixture()
         red, blue = self.make_client(), self.make_client("blue")
-        with patch("apps.control.sentinel.agents.codex.subprocess.run", side_effect=fixture):
+        with patch("apps.control.sentinel.agents.codex.CodexStructuredClient._run_cli", side_effect=fixture):
             red.complete("Unit-test request.", DECISION_SCHEMA)
             red.complete("Next unit-test request.", DECISION_SCHEMA)
             blue.complete("Separate unit-test request.", DECISION_SCHEMA)
@@ -153,7 +179,7 @@ class CodexProviderTests(unittest.TestCase):
             "MODEL_API_KEY": "UNIT_TEST_META_SECRET", "GITHUB_TOKEN": "UNIT_TEST_GITHUB_SECRET",
             "OPENAI_API_KEY": "UNIT_TEST_OPENAI_SECRET", "EXTRA_SECRET": "UNIT_TEST_EXTRA_SECRET",
         }
-        with patch.dict(os.environ, environment, clear=True), patch("apps.control.sentinel.agents.codex.subprocess.run", side_effect=fixture):
+        with patch.dict(os.environ, environment, clear=True), patch("apps.control.sentinel.agents.codex.CodexStructuredClient._run_cli", side_effect=fixture):
             client.complete("Unit-test prompt.", DECISION_SCHEMA)
         forwarded = fixture.invocations[0]["arguments"]["env"]
         self.assertEqual(forwarded["CODEX_HOME"], environment["CODEX_HOME"])
@@ -168,7 +194,7 @@ class CodexProviderTests(unittest.TestCase):
         fixture = CliFixture()
         client = self.make_client()
         prompt = "A unit-test structured inference request."
-        with patch("apps.control.sentinel.agents.codex.subprocess.run", side_effect=fixture), patch("apps.control.sentinel.agents.codex.time.monotonic", side_effect=[100.0, 102.0]):
+        with patch("apps.control.sentinel.agents.codex.CodexStructuredClient._run_cli", side_effect=fixture), patch("apps.control.sentinel.agents.codex.time.monotonic", side_effect=[100.0, 102.0]):
             data, metadata = client.complete(prompt, DECISION_SCHEMA)
         self.assertEqual(data, action_decision())
         self.assertEqual(metadata["provider"], "codex")
@@ -192,7 +218,7 @@ class CodexProviderTests(unittest.TestCase):
             client = self.make_client()
             events = [{"type": "error", "message": message}, {"type": "turn.failed"}]
             fixture = CliFixture(returncode=1, stdout="\n".join(json.dumps(event) for event in events))
-            with self.subTest(message=message), patch("apps.control.sentinel.agents.codex.subprocess.run", side_effect=fixture):
+            with self.subTest(message=message), patch("apps.control.sentinel.agents.codex.CodexStructuredClient._run_cli", side_effect=fixture):
                 with self.assertRaises(ProviderBlocked):
                     client.complete("Unit-test prompt.", DECISION_SCHEMA)
             self.assertEqual(len(fixture.invocations), 1)
@@ -213,7 +239,7 @@ class CodexProviderTests(unittest.TestCase):
                 ]
                 fixture = CliFixture(stdout="\n".join(json.dumps(event) for event in events))
                 client = self.make_client()
-                with self.subTest(item_type=item_type), patch("apps.control.sentinel.agents.codex.subprocess.run", side_effect=fixture), patch("apps.control.sentinel.gateway.Gateway.execute") as gateway_call:
+                with self.subTest(item_type=item_type), patch("apps.control.sentinel.agents.codex.CodexStructuredClient._run_cli", side_effect=fixture), patch("apps.control.sentinel.gateway.Gateway.execute") as gateway_call:
                     with self.assertRaisesRegex(ProviderError, "native tool"):
                         client.complete("Unit-test prompt.", DECISION_SCHEMA)
                     gateway_call.assert_not_called()
@@ -230,7 +256,7 @@ class CodexProviderTests(unittest.TestCase):
         ]
         for failure in failures:
             client = self.make_client()
-            with self.subTest(failure=type(failure).__name__), patch("apps.control.sentinel.agents.codex.subprocess.run", side_effect=failure), patch("apps.control.sentinel.gateway.Gateway.execute") as gateway_call:
+            with self.subTest(failure=type(failure).__name__), patch("apps.control.sentinel.agents.codex.CodexStructuredClient._run_cli", side_effect=failure), patch("apps.control.sentinel.gateway.Gateway.execute") as gateway_call:
                 with self.assertRaises(ProviderError):
                     client.complete("Unit-test prompt.", DECISION_SCHEMA)
                 gateway_call.assert_not_called()
@@ -242,7 +268,7 @@ class CodexProviderTests(unittest.TestCase):
         observation = ToolObservation(action_decision()["action"], "ALLOW", "EXECUTED", "staging_mutation_permitted", {"version": 1}, 1, [])
         fixture = CliFixture()
         client = self.make_client()
-        with patch("apps.control.sentinel.agents.codex.subprocess.run", side_effect=fixture):
+        with patch("apps.control.sentinel.agents.codex.CodexStructuredClient._run_cli", side_effect=fixture):
             decision = CodexAgentDriver(client).next_action(context, [observation])
         prompt = fixture.invocations[0]["arguments"]["input"]
         self.assertIn("professional technical English", prompt)
@@ -272,13 +298,16 @@ class CodexProviderTests(unittest.TestCase):
         self.assertNotIn("deny-capacity-regression", first)
         self.assertIn("Validator feedback", second)
         client.complete.side_effect = [({"added_rules": []}, {}), ({"added_rules": []}, {})]
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ProviderError, "failed validation after one correction") as caught:
             CodexPolicySynthesizer(client).synthesize({}, {}, schema)
+        self.assertEqual(caught.exception.error_category, "SCHEMA_ERROR")
         self.assertEqual(client.complete.call_count, 4)
 
     def test_missing_cli_and_cross_role_clients_are_rejected(self):
-        with patch("apps.control.sentinel.agents.codex.shutil.which", return_value=None), self.assertRaises(ProviderError):
-            CodexStructuredClient("red")
+        with patch("apps.control.sentinel.agents.codex.shutil.which", return_value=None):
+            client = CodexStructuredClient("red")
+        with self.assertRaisesRegex(ProviderBlocked, "inference is disabled"):
+            client.complete("Unit-test prompt.", DECISION_SCHEMA)
         with self.assertRaises(ValueError):
             CodexStructuredClient("unknown")
         with self.assertRaises(ValueError):

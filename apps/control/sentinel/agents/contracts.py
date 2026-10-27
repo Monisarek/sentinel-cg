@@ -13,11 +13,19 @@ if TYPE_CHECKING:
 
 
 class ProviderError(RuntimeError):
-    pass
+    error_category = "PROVIDER_ERROR"
 
 
 class ProviderBlocked(ProviderError):
-    pass
+    error_category = "PROVIDER_BLOCKED"
+
+
+class ProviderTransportError(ProviderError):
+    error_category = "PROVIDER_TRANSPORT_ERROR"
+
+
+class InferenceSchemaError(ProviderError):
+    error_category = "SCHEMA_ERROR"
 
 
 ACTION_SCHEMA = {

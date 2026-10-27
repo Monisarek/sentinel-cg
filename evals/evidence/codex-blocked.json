@@ -768,5 +768,9 @@
   "model_id_source": "explicit CLI configuration; service-returned model ID is unavailable",
   "model_id_service_confirmed": false,
   "blocker": "The Codex service rejected the next inference request because cybersecurity access is required. The run did not produce a verified counterexample.",
-  "acceptance_notes": "Historical failure evidence, preserved before terminal refusal handling was added. No Blue-generated repair, policy promotion, or adaptive re-attack was completed."
+  "acceptance_notes": "Historical failure evidence, preserved before terminal refusal handling was added. No Blue-generated repair, policy promotion, or adaptive re-attack was completed.",
+  "inference_status": "PROVIDER_BLOCKED",
+  "error_category": "PROVIDER_BLOCKED",
+  "gate_status": "PENDING",
+  "experimental_provider_status": "DISABLED"
 }

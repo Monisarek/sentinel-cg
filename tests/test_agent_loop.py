@@ -4,6 +4,7 @@ from dataclasses import asdict
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from apps.control.sentinel.agents.contracts import AgentDecision, ProviderBlocked, ProviderError
 from apps.control.sentinel.agents.loop import explore
@@ -86,6 +87,8 @@ class AgentLoopTests(unittest.TestCase):
                 self.assertEqual(evidence["executed_actions"], 0)
                 self.assertEqual(evidence["error_message"], str(failure))
                 self.assertEqual(evidence["result"], "Inference Failed")
+                self.assertEqual(evidence["inference_status"], failure.error_category)
+                self.assertEqual(evidence["error_category"], failure.error_category)
                 self.assertFalse(evidence["real_model_call"])
                 self.assertEqual(self.path.read_bytes(), before)
 
@@ -94,7 +97,21 @@ class AgentLoopTests(unittest.TestCase):
         before = self.path.read_bytes()
         evidence = explore(driver, self.sandbox, self.task)
         self.assertEqual(evidence["result"], "Inference Failed")
+        self.assertEqual(evidence["inference_status"], "SCHEMA_ERROR")
+        self.assertEqual(evidence["error_category"], "SCHEMA_ERROR")
         self.assertEqual(evidence["policy_decisions"], [])
+        self.assertEqual(self.path.read_bytes(), before)
+
+    def test_sandbox_execution_error_is_distinct_from_inference_failure(self):
+        driver = ScriptedDriver([self.config(4)])
+        before = self.path.read_bytes()
+        with patch.object(Sandbox, "_apply", side_effect=RuntimeError("Unit-fixture execution error")):
+            evidence = explore(driver, self.sandbox, self.task)
+        self.assertEqual(evidence["result"], "Execution Failed")
+        self.assertEqual(evidence["inference_status"], "COMPLETED")
+        self.assertEqual(evidence["error_category"], "EXECUTION_ERROR")
+        self.assertEqual(evidence["inference_failures"], [])
+        self.assertEqual(evidence["policy_decisions"][0]["outcome"], "ERROR")
         self.assertEqual(self.path.read_bytes(), before)
 
     def test_action_and_turn_budgets_bound_execution_and_reuse_is_rejected(self):

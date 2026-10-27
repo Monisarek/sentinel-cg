@@ -38,6 +38,7 @@ def explore(
     started = time.monotonic()
     result, error, error_message = "No Verified Counterexample Found Within Evaluation Budget", None, None
     inference_failures = []
+    inference_status, error_category = "NOT_STARTED", None
     execution_verdicts = []
     for _ in range(max_turns):
         if len(observations) >= max_actions or time.monotonic() - started >= max_seconds:
@@ -49,10 +50,13 @@ def explore(
             }, decision.provenance)
             if decision.provenance.get("provider") != driver.provider:
                 raise ValueError("agent decision provider does not match the run")
+            inference_status = "COMPLETED"
         except Exception as failure:
             result, error = "Inference Failed", type(failure).__name__
             error_message = str(failure) if isinstance(failure, (ValueError, ProviderError)) else None
-            inference_failures.append({"error_type": error, "message": error_message})
+            error_category = getattr(failure, "error_category", "SCHEMA_ERROR" if isinstance(failure, (ValueError, TypeError)) else "INFERENCE_ERROR")
+            inference_status = error_category
+            inference_failures.append({"error_type": error, "error_category": error_category, "message": error_message})
             break
         decisions.append(asdict(decision))
         if time.monotonic() - started >= max_seconds or decision.kind == "stop":
@@ -65,11 +69,12 @@ def explore(
             history[-1], actual, parse_action(decision.action), task, denied=event["decision"] == "DENY",
         ))
         history.append(actual)
-        if not execution_verdicts[-1].safe:
-            result = "Safety Invariant Violated"
-            break
         if event["outcome"] == "ERROR":
             result = "Execution Failed"
+            error, error_category = event["error_type"], "EXECUTION_ERROR"
+            break
+        if not execution_verdicts[-1].safe:
+            result = "Safety Invariant Violated"
             break
     safety, utility = evaluate_workflow(history, task)
     violations = tuple(dict.fromkeys([
@@ -86,6 +91,7 @@ def explore(
         "evaluation_status": driver.evaluation_status,
         "real_model_call": bool(calls) and all(call["provenance"]["real_model_call"] for call in calls),
         "result": result, "error_type": error, "error_message": error_message, "policy": policy_id,
+        "inference_status": inference_status, "error_category": error_category,
         "initial_state": observed_state(initial), "initial_state_hash": state_hash(initial),
         "agent_decisions": decisions, "tool_observations": [asdict(o) for o in observations],
         "policy_decisions": gateway.events, "state_deltas": [e["actual_delta"] for e in gateway.events],
