@@ -171,6 +171,7 @@ class MetaRuntimeTests(unittest.TestCase):
         self.assertEqual(result["policy_assurance_status"], "NO_COUNTEREXAMPLE_FOUND_WITHIN_BUDGET")
         self.assertEqual(result["evidence_kind"], "deterministic_test_fixture")
         self.assertFalse(result["real_model_call"])
+
         self.assertEqual(result["meta_confirmation"], "PENDING")
         for gate in ("G3", "G4_AI", "G7_AI", "G8"):
             self.assertEqual(result["gates"][gate], "PENDING")
@@ -229,6 +230,17 @@ class MetaRuntimeTests(unittest.TestCase):
         self.assertEqual(result["status"], "FAIL")
         self.assertEqual(result["gates"]["G7_AI"], "PENDING")
         self.assertFalse(result["real_model_call"])
+
+        # The last Gateway checkpoint precedes the aggregate Oracle summary.
+        checkpoint = {key: deepcopy(challenge[key]) for key in (
+            "seed", "initial_state_hash", "model_calls", "policy_decisions")}
+        checkpoint["in_progress"] = True
+        before = json.dumps(checkpoint, sort_keys=True)
+        assessment = assess_re_attack(checkpoint, result["stages"]["red"])
+        self.assertEqual(assessment["re_attack_outcome"], "NEW_VERIFIED_COUNTEREXAMPLE_FOUND")
+        self.assertEqual(assessment["policy_assurance_status"], "BYPASSED")
+        self.assertFalse(assessment["fresh_re_attack_completed"])
+        self.assertEqual(json.dumps(checkpoint, sort_keys=True), before)
 
     def test_immediate_stop_is_inconclusive_despite_a_recorded_fixture_response(self):
         result, _, _ = self.execute(FixtureHarness(reattack_mode="stop"))

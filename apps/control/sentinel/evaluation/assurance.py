@@ -32,7 +32,8 @@ def assess_re_attack(challenge: dict | None, source: dict | None) -> dict:
                 and event.get("reason") not in invalid_reasons and not event.get("error_type")
                 and event.get("before_hash") and event.get("after_hash") for event in events)
     )
-    if challenge.get("verified_counterexample") is True or safety.get("safe") is False:
+    if (challenge.get("verified_counterexample") is True or safety.get("safe") is False
+            or any((event.get("safety") or {}).get("safe") is False for event in events)):
         outcome, assurance = "NEW_VERIFIED_COUNTEREXAMPLE_FOUND", "BYPASSED"
     elif completed and challenge.get("verified_counterexample") is False and safety.get("safe") is True:
         outcome = "NO_VERIFIED_COUNTEREXAMPLE_FOUND_WITHIN_EVALUATION_BUDGET"

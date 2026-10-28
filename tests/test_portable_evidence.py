@@ -207,6 +207,16 @@ class PortableEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "aggregate inference provenance mismatch"):
             verify_evidence(package)
 
+    def test_rehashed_assurance_claim_must_match_the_recorded_experiment(self):
+        package = self.copy_package(self.meta_package)
+        path = package / "artifacts/evidence.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["policy_assurance_status"] = "BYPASSED"
+        write_json(path, data)
+        reseal_package(package)
+        with self.assertRaisesRegex(ValueError, "recorded policy_assurance_status mismatch"):
+            verify_evidence(package)
+
     def test_rehashed_manifest_cannot_omit_a_recorded_agent_snapshot(self):
         package = self.copy_package(self.meta_package)
         (package / "artifacts/red.sqlite3").unlink()

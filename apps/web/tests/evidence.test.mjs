@@ -284,3 +284,22 @@ test("empty, read-only, and budget-failed fresh attempts remain inconclusive", (
     assert.equal(view.gates.G7_AI, "PENDING", mode);
   }
 });
+
+test("an unsafe Gateway checkpoint remains BYPASSED before the aggregate Oracle summary exists", () => {
+  const raw = runtime();
+  raw.status = "PASS";
+  raw.runtime_status = "STOPPED";
+  raw.failure = { phase: "reattack", error_type: "PersistenceError", message: "Stopped after saving the unsafe Gateway event." };
+  raw.stages.reattack.in_progress = true;
+  delete raw.stages.reattack.verified_counterexample;
+  delete raw.stages.reattack.oracle_verdicts;
+  raw.stages.reattack.policy_decisions[0].safety = { safe: false, violations: ["S1: recorded unsafe committed state."] };
+  const before = JSON.stringify(raw);
+  const view = normalizeEvidence(raw);
+  assert.equal(view.status, "FAIL");
+  assert.equal(view.policy_assurance_status, "BYPASSED");
+  assert.equal(view.re_attack_outcome, "NEW_VERIFIED_COUNTEREXAMPLE_FOUND");
+  assert.strictEqual(view.raw, raw);
+  assert.equal(JSON.stringify(raw), before);
+  assert.match(render(raw), /A fresh re-attack found a verified counterexample/);
+});

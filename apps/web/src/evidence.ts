@@ -146,7 +146,7 @@ function reAttackAssessment(challenge: JsonRecord, source: JsonRecord, attempted
     && !challenge.error_category && !challenge.error_type && !records(challenge.inference_failures).length && meaningful
     && events.every(event => event.policy === "v1" && validEvent(event) && !!event.before_hash && !!event.after_hash);
   const safety = object(object(challenge.oracle_verdicts).safety);
-  if (challenge.verified_counterexample === true || safety.safe === false) return { completed, outcome: "NEW_VERIFIED_COUNTEREXAMPLE_FOUND", assurance: "BYPASSED" };
+  if (challenge.verified_counterexample === true || safety.safe === false || events.some(event => object(event.safety).safe === false)) return { completed, outcome: "NEW_VERIFIED_COUNTEREXAMPLE_FOUND", assurance: "BYPASSED" };
   if (completed && challenge.verified_counterexample === false && safety.safe === true) return {
     completed, outcome: "NO_VERIFIED_COUNTEREXAMPLE_FOUND_WITHIN_EVALUATION_BUDGET", assurance: "NO_COUNTEREXAMPLE_FOUND_WITHIN_BUDGET",
   };

@@ -11,6 +11,7 @@ import sqlite3
 import subprocess
 
 from apps.control.sentinel.evaluation.promotion import EVALS, _fixture, frozen_suite_hashes
+from apps.control.sentinel.evaluation.assurance import assess_re_attack
 from apps.control.sentinel.oracles import evaluate_execution, evaluate_utility, evaluate_workflow
 from apps.control.sentinel.policy import evaluate_v0
 from apps.control.sentinel.policy.dsl import OverlayPolicy, validate_patch
@@ -597,6 +598,15 @@ def _proof(data, directory):
                     provenance = call["provenance"]
                     _require(provenance.get("provider") == "meta" and bool(provenance.get("model_id")), "invalid recorded model provenance")
                     _require(provenance.get("real_model_call") is (not fixture), "model provenance differs from evidence kind")
+        if "policy_assurance_status" in data:
+            challenge = stages.get("reattack")
+            if challenge is None and (data.get("failure") or {}).get("phase") == "reattack":
+                challenge = {}
+            assessment = assess_re_attack(challenge, stages.get("red"))
+            for key in ("re_attack_outcome", "policy_assurance_status"):
+                _equal(data[key], assessment[key], "recorded " + key)
+            if assessment["policy_assurance_status"] in ("BYPASSED", "INCONCLUSIVE"):
+                _require(data["status"] != "PASS", "unsuccessful policy assurance cannot have overall PASS")
         machine, replay_directory = stages.get("replay"), "replay"
     if machine is not None:
         _require(patch is not None and "v1" in versions, "replay requires verified policy versions")
