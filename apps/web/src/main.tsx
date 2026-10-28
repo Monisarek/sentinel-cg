@@ -21,7 +21,7 @@ function Status({ pass, children }: { pass: boolean; children: ReactNode }) {
 }
 
 function RecordedStatus({ value }: { value: string }) {
-  return <span className={`status ${value === "PASS" ? "pass" : ["FAIL", "BLOCKED", "STOPPED"].includes(value) ? "fail" : "unconfirmed"}`}>{value}</span>;
+  return <span className={`status ${value === "PASS" ? "pass" : ["FAIL", "BLOCKED", "STOPPED", "FAILED", "BYPASSED"].includes(value) ? "fail" : "unconfirmed"}`}>{value}</span>;
 }
 
 function CheckStatus({ value, success = "PASS" }: { value: boolean | undefined; success?: string }) {
@@ -124,6 +124,12 @@ function RuntimeStages({ bundle }: { bundle: Bundle }) {
 export function Workspace({ bundle, selected, select, recorded }: { bundle: Bundle; selected: number; select: (step: number) => void; recorded: number }) {
   return <>
     {bundle.errors.length > 0 && <div role="alert" className="notice error">{bundle.errors.map((error, index) => <div key={index}>{error}</div>)}</div>}
+    {bundle.format === "meta" && <section className="panel deltas"><div className="section-title"><h2>Pipeline and policy assurance</h2><RecordedStatus value={bundle.status} /></div>
+      <dl className="verification-list"><div><dt>Pipeline execution</dt><dd><RecordedStatus value={bundle.pipeline_status} /></dd></div><div><dt>Fresh re-attack outcome</dt><dd><code>{bundle.re_attack_outcome}</code></dd></div><div><dt>Policy assurance</dt><dd><RecordedStatus value={bundle.policy_assurance_status} /></dd></div></dl>
+      {bundle.policy_assurance_status === "BYPASSED" && <p role="alert">A fresh re-attack found a verified counterexample. Completed orchestration and earlier promotion do not establish policy assurance.</p>}
+      {bundle.policy_assurance_status === "INCONCLUSIVE" && <p>No conclusive bounded policy evaluation was completed. A stopped, empty, or read-only re-attack cannot establish policy assurance.</p>}
+      <p className="muted">{bundle.fixture ? "Fixture PASS describes the deterministic test pipeline only; it is not Meta-generated assurance evidence. " : ""}G7 reports experiment completion separately from its safety outcome. No finding is limited to the recorded evaluation budget.</p>
+    </section>}
     <TimeMachine bundle={bundle} selected={selected} select={select} recorded={recorded} />
     <PolicyVerification bundle={bundle} />
     <RuntimeStages bundle={bundle} />

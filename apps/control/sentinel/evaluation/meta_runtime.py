@@ -13,6 +13,7 @@ from apps.control.sentinel.agents.budget import ApprovedBudget, RuntimeBudget, P
 from apps.control.sentinel.agents.contracts import InferenceSchemaError, ProviderBlocked, ProviderError
 from apps.control.sentinel.agents.loop import explore
 from apps.control.sentinel.agents.meta import MetaAgentDriver, MetaPolicySynthesizer
+from apps.control.sentinel.evaluation.assurance import assess_re_attack
 from apps.control.sentinel.evaluation.promotion import frozen_suite_hashes
 from apps.control.sentinel.policy.dsl import policy_schema
 from apps.control.sentinel.policy.versions import PolicyRegistry, digest
@@ -64,6 +65,7 @@ def _base_evidence(directory, seed, kind):
         "seed": seed, "evidence_kind": kind, "execution_mode": "meta_policy_repair_cycle",
         "provider": "meta", "real_model_call": False, "meta_confirmation": "PENDING",
         "status": "FAIL", "runtime_status": "PENDING", "error_category": None,
+        "pipeline_status": None, "re_attack_outcome": "NOT_RUN", "policy_assurance_status": "NOT_EVALUATED",
         "project_git_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
         "working_tree_dirty": bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT, text=True).strip()),
         "initial_state": observed_state(initial), "initial_state_hash": state_hash(initial), "task": asdict(task),
@@ -159,6 +161,7 @@ def _execute_cycle(directory: Path, budget: RuntimeBudget, models: dict, seed: i
         red = run_red("red", initial, task, seed)
         if not red["verified_counterexample"] or red["executed_actions"] < 2:
             evidence["runtime_status"] = "NO_VERIFIED_COUNTEREXAMPLE_FOUND"
+            evidence["pipeline_status"] = "FAILED"
             evidence["runtime_checks"]["verified_discovery"] = False
             evidence["gates"]["G3"] = "PENDING" if fixture else "FAIL"
             return evidence
@@ -192,6 +195,7 @@ def _execute_cycle(directory: Path, budget: RuntimeBudget, models: dict, seed: i
         checkpoint()
         if not receipt["promoted"]:
             evidence["runtime_status"] = "CANDIDATE_REJECTED"
+            evidence["pipeline_status"] = "FAILED"
             evidence["runtime_checks"]["verified_promotion"] = False
             evidence["gates"]["G5"] = "FAIL"
             if receipt.get("error_category") == "BUDGET_EXCEEDED":
@@ -213,21 +217,32 @@ def _execute_cycle(directory: Path, budget: RuntimeBudget, models: dict, seed: i
         checkpoint()
         if machine["status"] != "PASS":
             evidence["runtime_status"] = "REPLAY_FAILED"
+            evidence["pipeline_status"] = "FAILED"
             return evidence
         phase = "reattack"
         fresh_seed = (seed + 1) % 2**32
         fresh, fresh_task = seeded_state(fresh_seed)
         challenge = run_red("reattack", fresh, fresh_task, fresh_seed)
-        evidence["runtime_checks"]["fresh_re_attack_completed"] = (
-            challenge["seed"] != seed and challenge["initial_state_hash"] != red["initial_state_hash"]
-            and all(event["policy"] == "v1" for event in challenge["policy_decisions"]))
-        evidence["gates"]["G7_AI"] = "PENDING" if fixture else "PASS"
-        evidence["re_attack_outcome"] = "NEW_VERIFIED_COUNTEREXAMPLE_FOUND" if challenge["verified_counterexample"] else "NO_VERIFIED_COUNTEREXAMPLE_FOUND_WITHIN_EVALUATION_BUDGET"
+        assessment = assess_re_attack(challenge, red)
+        evidence["runtime_checks"]["fresh_re_attack_completed"] = assessment.pop("fresh_re_attack_completed")
+        evidence.update(assessment)
+        evidence["runtime_checks"]["no_verified_counterexample_on_re_attack"] = (
+            evidence["policy_assurance_status"] == "NO_COUNTEREXAMPLE_FOUND_WITHIN_BUDGET")
+        evidence["gates"]["G7_AI"] = ("PENDING" if fixture else
+            "PASS" if evidence["runtime_checks"]["fresh_re_attack_completed"] else "FAIL")
         evidence["status"] = "PASS" if all(evidence["runtime_checks"].values()) else "FAIL"
         evidence["runtime_status"] = "COMPLETED"
+        evidence["pipeline_status"] = "COMPLETED"
         evidence["meta_confirmation"] = "PENDING" if fixture else "GENUINE_META_RUNS_RECORDED"
     except Exception as failure:
         evidence["runtime_status"] = "STOPPED"
+        evidence["pipeline_status"] = "STOPPED"
+        if phase == "reattack":
+            assessment = assess_re_attack(evidence["stages"]["reattack"] or {}, evidence["stages"]["red"])
+            evidence["runtime_checks"]["fresh_re_attack_completed"] = False
+            assessment.pop("fresh_re_attack_completed")
+            evidence.update(assessment)
+            evidence["gates"]["G7_AI"] = "PENDING" if fixture else "FAIL"
         evidence["error_category"] = getattr(failure, "error_category", "RUNTIME_ERROR")
         if phase in ("red", "reattack") and evidence["stages"][phase]:
             evidence["error_category"] = evidence["stages"][phase].get("error_category") or evidence["error_category"]
@@ -256,6 +271,7 @@ def run_meta(output_root: Path, authorization_file: Path | None = None, *, seed:
             "message": str(failure) if isinstance(failure, ProviderError) or type(failure) is ValueError else "Authorization file could not be validated"}
     if evidence["blocked_reasons"]:
         evidence["runtime_status"] = "BLOCKED"
+        evidence["pipeline_status"] = "STOPPED"
         evidence["error_category"] = ("BUDGET_NOT_AUTHORIZED" if "BUDGET_NOT_AUTHORIZED" in evidence["blocked_reasons"]
                                       else "CONFIG_ERROR" if "AUTHORIZATION_CONFIG_INVALID" in evidence["blocked_reasons"] else "PROVIDER_BLOCKED")
         _save(directory, evidence)
@@ -267,7 +283,7 @@ def run_meta(output_root: Path, authorization_file: Path | None = None, *, seed:
         return _execute_cycle(directory, budget, models, seed)
     except Exception as failure:
         evidence = json.loads((directory / "evidence.json").read_text(encoding="utf-8"))
-        evidence.update(status="FAIL", runtime_status="STOPPED",
+        evidence.update(status="FAIL", runtime_status="STOPPED", pipeline_status="STOPPED",
                         error_category=getattr(failure, "error_category", "RUNTIME_ERROR"))
         evidence["failure"] = {"phase": "initialization_or_persistence", "error_type": type(failure).__name__,
                                "message": "Runtime stopped without requesting another model call"}

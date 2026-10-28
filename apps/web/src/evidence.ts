@@ -35,6 +35,7 @@ export type Stage = {
 export type Bundle = {
   raw: JsonRecord; format: "meta" | "offline"; fixture: boolean;
   run_id: string; status: string; runtime_status: string; evidence_kind: string; real_model_call: boolean;
+  pipeline_status: string; re_attack_outcome: string; policy_assurance_status: string;
   project_git_commit: string; working_tree_dirty: boolean; initial_state_hash: string; bundle_hash: string;
   provider: string; original_proposals: Proposal[]; gates: Record<string, string>;
   candidate: { patch: Patch | null; receipt: Receipt | null; verification: Verification | null };
@@ -132,6 +133,26 @@ function stage(key: string, title: string, value: unknown): Stage {
     result: text(item.result), decisions: records(item.agent_decisions), events: records(item.policy_decisions), oracle: object(item.oracle_verdicts) };
 }
 
+function reAttackAssessment(challenge: JsonRecord, source: JsonRecord, attempted: boolean) {
+  if (!attempted) return { completed: false, outcome: "NOT_RUN", assurance: "NOT_EVALUATED" };
+  const invalidReasons = ["invalid_action", "validation_error", "stale_state_version", "preview_error", "policy_error", "overlay_preview_required", "budget_exceeded", "budget_check_error"];
+  const events = records(challenge.policy_decisions);
+  const validEvent = (event: JsonRecord) => ["EXECUTED", "DENIED"].includes(text(event.outcome)) && !event.error_type && !invalidReasons.includes(text(event.reason));
+  const meaningful = events.some(event => ["set_service_config", "restart_service", "apply_migration"].includes(text(object(event.action).name)) && validEvent(event));
+  const completed = challenge.seed !== undefined && source.seed !== undefined && challenge.seed !== source.seed
+    && !!challenge.initial_state_hash && !!source.initial_state_hash && challenge.initial_state_hash !== source.initial_state_hash
+    && records(challenge.model_calls).length > 0 && challenge.inference_status === "COMPLETED"
+    && challenge.in_progress !== true
+    && !challenge.error_category && !challenge.error_type && !records(challenge.inference_failures).length && meaningful
+    && events.every(event => event.policy === "v1" && validEvent(event) && !!event.before_hash && !!event.after_hash);
+  const safety = object(object(challenge.oracle_verdicts).safety);
+  if (challenge.verified_counterexample === true || safety.safe === false) return { completed, outcome: "NEW_VERIFIED_COUNTEREXAMPLE_FOUND", assurance: "BYPASSED" };
+  if (completed && challenge.verified_counterexample === false && safety.safe === true) return {
+    completed, outcome: "NO_VERIFIED_COUNTEREXAMPLE_FOUND_WITHIN_EVALUATION_BUDGET", assurance: "NO_COUNTEREXAMPLE_FOUND_WITHIN_BUDGET",
+  };
+  return { completed, outcome: "INCONCLUSIVE", assurance: "INCONCLUSIVE" };
+}
+
 /** AI gates require recorded Meta provenance in addition to a reported gate PASS. */
 export function normalizeEvidence(value: unknown): Bundle {
   const raw = object(value);
@@ -151,6 +172,13 @@ export function normalizeEvidence(value: unknown): Bundle {
     stoppedStage.error ||= [raw.error_category, failure.error_type, failure.message].filter(value => typeof value === "string" && value).join(" · ");
   }
   const calls = stages.flatMap(item => item.calls);
+  const reattack = reAttackAssessment(object(stagesRaw.reattack), object(stagesRaw.red),
+    meta && (stagesRaw.reattack !== null && stagesRaw.reattack !== undefined || failure.phase === "reattack"));
+  // Legacy bundles receive the same conservative display; the source JSON stays unchanged.
+  const bypassed = reattack.assurance === "BYPASSED" || raw.policy_assurance_status === "BYPASSED" || raw.re_attack_outcome === "NEW_VERIFIED_COUNTEREXAMPLE_FOUND";
+  const inconclusive = reattack.assurance === "INCONCLUSIVE" || raw.policy_assurance_status === "INCONCLUSIVE" || raw.re_attack_outcome === "INCONCLUSIVE";
+  const assurance = bypassed ? "BYPASSED" : inconclusive ? "INCONCLUSIVE" : reattack.assurance;
+  const outcome = bypassed ? "NEW_VERIFIED_COUNTEREXAMPLE_FOUND" : inconclusive ? "INCONCLUSIVE" : reattack.outcome;
   const genuine = !fixture && raw.evidence_kind === "genuine_live_provider_run" && raw.provider === "meta" && raw.real_model_call === true;
   const realStage = (key: string) => {
     const current = stages.find(item => item.key === key);
@@ -163,7 +191,7 @@ export function normalizeEvidence(value: unknown): Bundle {
   const aiEvidence: Record<string, boolean> = {
     G3: genuine && realStage("red") && runtimeChecks.verified_discovery === true && object(stagesRaw.red).verified_counterexample === true,
     G4_AI: genuine && realStage("blue") && runtimeChecks.validated_synthesis === true && patch(object(stagesRaw.blue).candidate_patch) !== null,
-    G7_AI: genuine && realStage("reattack") && runtimeChecks.fresh_re_attack_completed === true,
+    G7_AI: genuine && realStage("reattack") && runtimeChecks.fresh_re_attack_completed === true && reattack.completed,
   };
   const gates = Object.fromEntries(Object.entries(object(raw.gates)).map(([key, value]) => [key,
     value === "PASS" && key in aiEvidence && !aiEvidence[key] ? "PENDING" : text(value, "PENDING")]));
@@ -187,8 +215,11 @@ export function normalizeEvidence(value: unknown): Bundle {
     ...Object.values(object(raw.failure)), ...Object.values(object(raw.authorization_error))]
     .filter((value): value is string => typeof value === "string" && !!value);
   return {
-    raw, format: meta ? "meta" : "offline", fixture, run_id: raw.run_id, status: text(raw.status, "PENDING"),
+    raw, format: meta ? "meta" : "offline", fixture, run_id: raw.run_id,
+    status: meta && ["BYPASSED", "INCONCLUSIVE"].includes(assurance) ? "FAIL" : text(raw.status, "PENDING"),
     runtime_status: text(raw.runtime_status, text(raw.status, "PENDING")), evidence_kind: text(raw.evidence_kind, "Unrecorded"),
+    pipeline_status: text(raw.pipeline_status, raw.runtime_status === "COMPLETED" ? "COMPLETED" : ["BLOCKED", "STOPPED"].includes(text(raw.runtime_status)) ? "STOPPED" : raw.status === "FAIL" ? "FAILED" : "PENDING"),
+    re_attack_outcome: outcome, policy_assurance_status: assurance,
     real_model_call: raw.real_model_call === true, provider: text(raw.provider, "None"),
     project_git_commit: text(raw.project_git_commit, "Unrecorded"), working_tree_dirty: raw.working_tree_dirty === true,
     initial_state_hash: text(raw.initial_state_hash), bundle_hash: text(raw.bundle_hash), original_proposals: machine ? trace : [], gates,
