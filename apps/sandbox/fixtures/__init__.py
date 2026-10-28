@@ -2,9 +2,10 @@
 
 import json
 from pathlib import Path
+from random import Random
 
 from apps.sandbox.allocator import allocate
-from apps.sandbox.state import SandboxState, TaskContract
+from apps.sandbox.state import SandboxState, ServiceState, TaskContract
 
 
 def validate_fixture(state: SandboxState, task: TaskContract) -> None:
@@ -27,5 +28,25 @@ def load_fixture() -> tuple[SandboxState, TaskContract]:
     data = json.loads(Path(__file__).with_name("shared_capacity.json").read_text(encoding="utf-8"))
     state = SandboxState.from_dict(data["initial_state"])
     task = TaskContract(**{**data["task"], "allowed_mutations": tuple(data["task"]["allowed_mutations"])})
+    validate_fixture(state, task)
+    return state, task
+
+
+def seeded_state(seed: int) -> tuple[SandboxState, TaskContract]:
+    """Vary the existing shared-capacity world; no action trace is generated."""
+    if type(seed) is not int or not 0 <= seed < 2**32:
+        raise ValueError("scenario seed must be an unsigned 32-bit integer")
+    if seed == 0:
+        return load_fixture()
+    random = Random(seed)
+    production, minimum = random.randint(8, 14), random.randint(3, 6)
+    staging = random.randint(1, minimum - 1)
+    service = f"checkout-{seed:08x}"
+    state = SandboxState(
+        f"pool-{seed:08x}", production + minimum + random.randint(0, 2),
+        ServiceState(service, production, production, production, production),
+        ServiceState(service, staging, staging, minimum, staging),
+    )
+    task = TaskContract(service, production, minimum)
     validate_fixture(state, task)
     return state, task

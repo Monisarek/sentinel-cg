@@ -21,11 +21,17 @@ def replay(
     initial: SandboxState, task: TaskContract, proposals: list[dict],
     v1: CandidatePolicyPatch, output_root: Path, *, policy_hash_v1: str | None = None,
     policy_hash_v0: str | None = None,
+    source_live_run_id: str | None = None, input_evidence_kind: str = "deterministic_test_fixture",
 ) -> dict:
     """Counterfactual execution only; no model discovery or policy activation."""
     if type(proposals) is not list or any(type(proposal) is not dict for proposal in proposals):
         raise ValueError("recorded action trace must be a list of action objects")
     overlay = OverlayPolicy(v1)
+    if input_evidence_kind not in ("deterministic_test_fixture", "genuine_live_provider_run"):
+        raise ValueError("unknown replay source provenance")
+    if input_evidence_kind == "genuine_live_provider_run" and not source_live_run_id:
+        raise ValueError("live trace replay requires a source run ID")
+    replay_kind = "fixed_trace_deterministic_replay" if source_live_run_id else "deterministic_test_fixture"
     trace_text = _canonical(proposals)
     trace = json.loads(trace_text)
     root = Path(output_root).resolve()
@@ -39,7 +45,8 @@ def replay(
         actual = Sandbox(path).read()
         initial_hash = run["steps"][0]["before_hash"] if run["steps"] else state_hash(actual)
         run.update({
-            "evidence_kind": "deterministic_test_fixture",
+            "evidence_kind": replay_kind,
+            "input_evidence_kind": input_evidence_kind,
             "execution_mode": "fixed_trace_counterfactual_replay",
             "sandbox_path": str(path), "initial_state_hash": initial_hash,
             "recorded_trace_hash": sha256(_canonical(run["proposals"]).encode("utf-8")).hexdigest(),
@@ -85,10 +92,11 @@ def replay(
     }
     evidence = {
         "schema_version": 1, "gate": "G6", "status": "PASS" if all(checks.values()) else "FAIL",
-        "evidence_kind": "deterministic_test_fixture",
+        "evidence_kind": replay_kind, "input_evidence_kind": input_evidence_kind,
         "execution_mode": "fixed_trace_counterfactual_replay",
-        "provider": None, "real_model_call": False, "meta_confirmation": "PENDING",
-        "source_live_run_id": None, "source_trace_hash": trace_hash,
+        "provider": None, "real_model_call": False, "meta_confirmation": "SOURCE_RUN" if source_live_run_id else "PENDING",
+        "source_provider": "meta" if source_live_run_id else None,
+        "source_live_run_id": source_live_run_id, "source_trace_hash": trace_hash,
         "initial_state_hash": initial_hash, "recorded_trace": trace, "recorded_trace_hash": trace_hash,
         "policy_hash_v0": policy_hash_v0, "policy_hash_v1": policy_hash_v1 or patch_hash,
         "policy_hash_sources": {"v0": "registry" if policy_hash_v0 else "not supplied", "v1": "registry" if policy_hash_v1 else "patch content hash"},

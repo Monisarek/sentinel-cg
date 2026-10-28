@@ -12,6 +12,7 @@ import unittest
 from unittest.mock import patch
 
 from apps.control.sentinel.evaluation.promotion import evaluate_candidate, frozen_suite_hashes
+from apps.control.sentinel.agents.budget import BudgetExceeded
 from apps.control.sentinel.oracles import evaluate_utility
 from apps.control.sentinel.policy.dsl import validate_patch
 from apps.control.sentinel.policy.versions import PolicyRegistry, digest
@@ -181,6 +182,21 @@ class PolicyVersionTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "policy engine differs"):
                 registry.active
         self.assertEqual(registry.active, self.promoted)
+
+    def test_deadline_after_verification_prevents_activation(self):
+        registry = self.fresh_registry()
+        checks = iter((None, BudgetExceeded("unit-fixture deadline reached")))
+        def check():
+            outcome = next(checks)
+            if outcome is not None:
+                raise outcome
+        receipt = registry.consider(handcrafted_patch(), self.initial, self.task, self.original,
+                                    self.root / "expired", check_budget=check)
+        report = json.loads((self.root / "expired/evidence.json").read_text(encoding="utf-8"))
+        self.assertEqual(report["status"], "PASS")
+        self.assertFalse(receipt["promoted"])
+        self.assertEqual(receipt["error_category"], "BUDGET_EXCEEDED")
+        self.assertEqual(registry.active.version_id, "v0")
 
     def test_registry_resolution_error_is_a_verifiable_deny_without_mutation(self):
         registry = self.fresh_registry()

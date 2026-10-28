@@ -24,6 +24,8 @@ OBJECTIVE = (
 def explore(
     driver: AgentDriver, sandbox: Sandbox, task: TaskContract, *, policy=evaluate_v0,
     policy_id: str = "v0", max_actions: int = 10, max_turns: int = 12, max_seconds: int = 300,
+    gateway=None, seed: int = 0, current_policy: dict | None = None,
+    check_budget=None, on_progress=None,
 ) -> dict:
     if any(type(value) is not int or value < 1 for value in (max_actions, max_turns, max_seconds)):
         raise ValueError("exploration budgets must be positive integers")
@@ -32,18 +34,27 @@ def explore(
     initial = sandbox.read()
     if not evaluate_safety(initial, task).safe:
         raise ValueError("exploration must start with protected production capacity")
-    context = AgentContext(task, observed_state(initial), OBJECTIVE, max_actions)
-    gateway = Gateway(sandbox, task, policy=policy, policy_id=policy_id)
+    context = AgentContext(task, observed_state(initial), OBJECTIVE, max_actions, seed, current_policy)
+    gateway = gateway if gateway is not None else Gateway(sandbox, task, policy=policy, policy_id=policy_id)
     observations, decisions, history = [], [], [initial]
     started = time.monotonic()
     result, error, error_message = "No Verified Counterexample Found Within Evaluation Budget", None, None
     inference_failures = []
     inference_status, error_category = "NOT_STARTED", None
     execution_verdicts = []
+
+    def progress():
+        if on_progress is not None:
+            on_progress({"agent_decisions": deepcopy(decisions), "model_calls": deepcopy(driver.calls),
+                         "policy_decisions": deepcopy(gateway.events),
+                         "tool_observations": [asdict(item) for item in observations],
+                         "current_state": observed_state(history[-1]), "seed": seed})
     for _ in range(max_turns):
         if len(observations) >= max_actions or time.monotonic() - started >= max_seconds:
             break
         try:
+            if check_budget is not None:
+                check_budget()
             decision = driver.next_action(context, observations)
             decision = parse_decision({
                 "kind": decision.kind, "action": decision.action, "explanation": decision.explanation,
@@ -59,9 +70,17 @@ def explore(
             inference_failures.append({"error_type": error, "error_category": error_category, "message": error_message})
             break
         decisions.append(asdict(decision))
+        progress()
         if time.monotonic() - started >= max_seconds or decision.kind == "stop":
             break
-        event = gateway.execute(decision.action, expected_state_version=history[-1].version)
+        try:
+            if check_budget is not None:
+                check_budget()
+        except ProviderError as failure:
+            result, error, error_category = "Budget Exhausted", type(failure).__name__, failure.error_category
+            error_message = str(failure)
+            break
+        event = gateway.execute(decision.action, expected_state_version=history[-1].version, check_budget=check_budget)
         observations.append(ToolObservation.from_event(event))
         # Independent oracle input is reread from SQLite; the driver gets no database handle.
         actual = sandbox.read()
@@ -69,6 +88,11 @@ def explore(
             history[-1], actual, parse_action(decision.action), task, denied=event["decision"] == "DENY",
         ))
         history.append(actual)
+        progress()
+        if event["reason"] == "budget_exceeded":
+            result, error, error_category = "Budget Exhausted", event["error_type"], "BUDGET_EXCEEDED"
+            error_message = "The approved deadline expired before commit"
+            break
         if event["outcome"] == "ERROR":
             result = "Execution Failed"
             error, error_category = event["error_type"], "EXECUTION_ERROR"
@@ -103,4 +127,5 @@ def explore(
         "inference_failures": inference_failures,
         "limits": {"max_actions": max_actions, "max_turns": max_turns, "max_seconds": max_seconds},
         "latency_seconds": time.monotonic() - started,
+        "seed": seed,
     }

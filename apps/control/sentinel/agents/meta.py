@@ -3,17 +3,19 @@
 from copy import deepcopy
 from dataclasses import asdict
 from hashlib import sha256
+import asyncio
 import json
 import os
 import time
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+
+import httpx
 
 from apps.control.sentinel.agents.contracts import (
     ACTION_SCHEMA, AgentContext, AgentDecision, ToolObservation, InferenceSchemaError,
     ProviderBlocked, ProviderError, ProviderTransportError, parse_decision,
 )
 from apps.control.sentinel.policy.dsl import CandidatePolicyPatch, validate_patch
+from apps.control.sentinel.agents.budget import BudgetExceeded, RuntimeBudget
 from apps.sandbox.transitions import parse_action
 
 
@@ -49,44 +51,95 @@ TOOLS = [
 TOOL_ARGUMENTS = {tool["function"]["name"]: set(tool["function"]["parameters"]["required"]) for tool in TOOLS}
 
 
+def _reject_nonfinite(value):
+    raise ValueError("Meta returned a non-finite JSON number")
+
+
+async def _send_request(encoded: bytes, headers: dict, timeout: float) -> bytes:
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+        async with client.stream("POST", API_URL, content=encoded, headers=headers) as response:
+            if response.status_code != 200:
+                failure = ProviderBlocked if response.status_code in (401, 403, 429) else ProviderTransportError
+                raise failure(f"Meta API request failed with HTTP {response.status_code}")
+            raw = bytearray()
+            async for chunk in response.aiter_bytes(chunk_size=65536):
+                raw.extend(chunk)
+                if len(raw) > 2_000_000:
+                    raise InferenceSchemaError("Meta response size limit exceeded")
+            return bytes(raw)
+
+
+async def _request_with_deadline(encoded: bytes, headers: dict, timeout: float) -> bytes:
+    return await asyncio.wait_for(_send_request(encoded, headers, timeout), timeout=timeout)
+
+
 class _MetaClient:
-    def __init__(self, role: str, model_id: str, timeout_seconds: int, max_completion_tokens: int):
+    def __init__(self, role: str, model_id: str, timeout_seconds: int, max_completion_tokens: int,
+                 budget: RuntimeBudget | None):
         self._key = os.getenv("MODEL_API_KEY", "").strip()
         if not self._key:
             raise ProviderBlocked("Meta API access requires MODEL_API_KEY; no fallback provider was used")
+        if budget is None:
+            error = ProviderBlocked("BUDGET_NOT_AUTHORIZED: Meta inference requires an explicitly approved runtime budget")
+            error.error_category = "BUDGET_NOT_AUTHORIZED"
+            raise error
+        if role not in ("red", "blue", "reattack"):
+            raise ValueError("unknown Meta inference role")
         if type(model_id) is not str or not model_id.strip():
             raise ValueError("Meta model_id must be a nonempty string")
         if any(type(value) is not int or value < 1 for value in (timeout_seconds, max_completion_tokens)):
             raise ValueError("Meta timeout and token budget must be positive integers")
         self.role, self.model_id = role, model_id
         self.timeout_seconds, self.max_completion_tokens = timeout_seconds, max_completion_tokens
+        self.budget = budget
         self.calls: list[dict] = []
+        self.diagnostics: list[dict] = []
 
     def complete(self, messages: list[dict], **options) -> tuple[dict, dict]:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            raise ProviderError("The synchronous Meta driver requires a caller outside an active event loop")
+        if set(options) - {"tools", "tool_choice", "parallel_tool_calls", "response_format"}:
+            raise InferenceSchemaError("Meta request options are outside the bounded tool and schema contract")
         payload = {"model": self.model_id, "messages": messages, "max_completion_tokens": self.max_completion_tokens, **options}
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
         if self._key in encoded.decode("utf-8"):
             raise ProviderError("Credential material cannot be included in Meta model context")
-        request = Request(API_URL, data=encoded, method="POST", headers={
+        ticket = self.budget.reserve(self.role, self.model_id)
+        payload["max_completion_tokens"] = min(self.max_completion_tokens, ticket.output_token_limit)
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        headers = {
             "Authorization": "Bearer " + self._key,
             "Content-Type": "application/json", "Accept": "application/json",
             "User-Agent": "sentinel-cg",
-        })
+        }
+        timeout = min(self.timeout_seconds, self.budget.remaining_seconds(self.role))
+        diagnostic = {"request_hash": sha256(encoded).hexdigest(), "role": self.role,
+                      "reservation": ticket.to_dict(), "request_attempted": True,
+                      "timeout_seconds": timeout, "status": "REQUESTED"}
+        self.diagnostics.append(diagnostic)
         started = time.monotonic()
         try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:
-                raw = response.read(2_000_001)
-            if len(raw) > 2_000_000:
-                raise ValueError("response size limit exceeded")
-            data = json.loads(raw.decode("utf-8"))
-        except HTTPError as error:
-            failure = ProviderBlocked if error.code in (401, 403, 429) else ProviderTransportError
-            raise failure(f"Meta API request failed with HTTP {error.code}") from None
-        except (URLError, OSError, TimeoutError) as error:
+            raw = asyncio.run(_request_with_deadline(encoded, headers, timeout))
+            data = json.loads(raw.decode("utf-8"), parse_constant=_reject_nonfinite)
+        except (asyncio.TimeoutError, TimeoutError):
+            diagnostic["status"] = "TIMEOUT"
+            self.budget.remaining_seconds(self.role)
+            raise ProviderTransportError("Meta API exceeded its request timeout; no retry was attempted") from None
+        except (httpx.HTTPError, OSError):
+            diagnostic["status"] = "PROVIDER_TRANSPORT_ERROR"
             raise ProviderTransportError("Meta API transport failed; no fallback provider was used") from None
-        except (ValueError, UnicodeError) as error:
+        except ProviderError as error:
+            diagnostic["status"] = error.error_category
+            raise
+        except (ValueError, UnicodeError):
+            diagnostic["status"] = "SCHEMA_ERROR"
             raise InferenceSchemaError("Meta API returned invalid JSON") from None
         if self._key in json.dumps(data, sort_keys=True):
+            diagnostic["status"] = "CREDENTIAL_MATERIAL_REJECTED"
             raise ProviderError("Meta response contained credential material and was not recorded")
         try:
             if type(data) is not dict or type(data.get("id")) is not str or not data["id"]:
@@ -97,7 +150,14 @@ class _MetaClient:
             if type(usage) is not dict or any(type(usage.get(name)) is not int or usage[name] < 0 for name in ("prompt_tokens", "completion_tokens")):
                 raise ValueError("missing usage accounting")
         except (ValueError, TypeError) as error:
+            diagnostic.update(status="SCHEMA_ERROR", response=deepcopy(data))
             raise InferenceSchemaError("Meta response lacks valid model, response ID, or usage metadata") from None
+        try:
+            accounting = self.budget.settle(ticket, data["model"], usage)
+        except BudgetExceeded:
+            diagnostic.update(status="BUDGET_EXCEEDED", response=deepcopy(data))
+            raise
+        diagnostic["status"] = "ACCOUNTED"
         metadata = {
             "provider": "meta", "evaluation_status": "live", "real_model_call": True,
             "role": self.role, "model_id": data["model"], "requested_model_id": self.model_id,
@@ -105,8 +165,12 @@ class _MetaClient:
             "latency_seconds": time.monotonic() - started,
             "prompt_hash": sha256(json.dumps(messages, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
             "request_hash": sha256(encoded).hexdigest(),
+            "budget": accounting, "reservation": ticket.to_dict(),
         }
         self.calls.append({"provenance": metadata, "response": deepcopy(data)})
+        self.budget.remaining_seconds(self.role)
+        if usage["completion_tokens"] > payload["max_completion_tokens"]:
+            raise InferenceSchemaError("Meta output usage exceeded the requested completion token limit")
         return data, metadata
 
 
@@ -131,9 +195,13 @@ class MetaAgentDriver:
     provider = "meta"
     evaluation_status = "live"
 
-    def __init__(self, model_id: str = "muse-spark-1.3", timeout_seconds: int = 90, max_completion_tokens: int = 4096):
-        self._client = _MetaClient("red", model_id, timeout_seconds, max_completion_tokens)
+    def __init__(self, model_id: str = "muse-spark-1.3", timeout_seconds: int = 90, max_completion_tokens: int = 4096,
+                 *, budget: RuntimeBudget | None = None, role: str = "red"):
+        if role not in ("red", "reattack"):
+            raise ValueError("Adversarial Explorer role must be red or reattack")
+        self._client = _MetaClient(role, model_id, timeout_seconds, max_completion_tokens, budget)
         self.calls = self._client.calls
+        self.diagnostics = self._client.diagnostics
         self._messages: list[dict] = []
         self._context = None
         self._pending = None
@@ -219,9 +287,11 @@ class MetaPolicySynthesizer:
     provider = "meta"
     evaluation_status = "live"
 
-    def __init__(self, model_id: str = "muse-wonder-1.0", timeout_seconds: int = 90, max_completion_tokens: int = 4096):
-        self._client = _MetaClient("blue", model_id, timeout_seconds, max_completion_tokens)
+    def __init__(self, model_id: str = "muse-wonder-1.0", timeout_seconds: int = 90, max_completion_tokens: int = 4096,
+                 *, budget: RuntimeBudget | None = None):
+        self._client = _MetaClient("blue", model_id, timeout_seconds, max_completion_tokens, budget)
         self.calls = self._client.calls
+        self.diagnostics = self._client.diagnostics
 
     @property
     def model_id(self) -> str:

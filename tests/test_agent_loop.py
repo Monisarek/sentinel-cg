@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from apps.control.sentinel.agents.contracts import AgentDecision, ProviderBlocked, ProviderError
 from apps.control.sentinel.agents.loop import explore
+from apps.control.sentinel.agents.budget import BudgetExceeded
 from apps.sandbox.fixtures import load_fixture
 from apps.sandbox.state.store import Sandbox
 
@@ -124,6 +125,23 @@ class AgentLoopTests(unittest.TestCase):
         for argument in ("max_actions", "max_turns", "max_seconds"):
             with self.subTest(argument=argument), self.assertRaises(ValueError):
                 explore(ScriptedDriver([]), self.sandbox, self.task, **{argument: 0})
+
+    def test_expired_budget_after_response_cannot_commit_and_progress_preserves_proposal(self):
+        driver = ScriptedDriver([self.config(6)])
+        original = self.path.read_bytes()
+        progress = []
+        checks = iter((None, BudgetExceeded("unit-fixture deadline exhausted")))
+        def check():
+            outcome = next(checks)
+            if outcome is not None:
+                raise outcome
+        result = explore(driver, self.sandbox, self.task, check_budget=check, on_progress=progress.append)
+        self.assertEqual(result["error_category"], "BUDGET_EXCEEDED")
+        self.assertEqual(result["inference_status"], "COMPLETED")
+        self.assertEqual(len(result["agent_decisions"]), 1)
+        self.assertEqual(result["executed_actions"], 0)
+        self.assertEqual(len(progress[0]["agent_decisions"]), 1)
+        self.assertEqual(self.path.read_bytes(), original)
 
 
 if __name__ == "__main__":

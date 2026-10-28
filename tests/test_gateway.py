@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 
 from apps.control.sentinel.gateway import Gateway
 from apps.control.sentinel.policy import Decision, evaluate_v0
+from apps.control.sentinel.agents.budget import BudgetExceeded
 from apps.sandbox.fixtures import load_fixture
 from apps.sandbox.preview import impact_facts, preview_action, state_delta
 from apps.sandbox.state import SandboxState, state_hash
@@ -45,6 +46,42 @@ class GatewayTests(unittest.TestCase):
         unsigned = {key: value for key, value in event.items() if key != "event_hash"}
         digest = sha256(json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
         self.assertEqual(event["event_hash"], digest)
+
+    def test_budget_expiry_during_policy_wait_denies_before_sql_update(self):
+        expired = False
+        def policy(*args):
+            nonlocal expired
+            expired = True
+            return evaluate_v0(*args)
+        def check():
+            if expired:
+                raise BudgetExceeded("unit-fixture deadline expired")
+        before = self.path.read_bytes()
+        with patch.object(self.sandbox, "_apply") as apply:
+            event = Gateway(self.sandbox, self.task, policy=policy).execute(self.config(), check_budget=check)
+            apply.assert_not_called()
+        self.assertEqual((event["decision"], event["reason"]), ("DENY", "budget_exceeded"))
+        self.assert_unchanged(event, self.initial, before)
+        self.assert_event_hash(event)
+
+    def test_budget_expiry_during_real_sql_update_rolls_back(self):
+        expired = False
+        original_apply = self.sandbox._apply
+        def apply(*args):
+            nonlocal expired
+            actual = original_apply(*args)
+            expired = True
+            return actual
+        def check():
+            if expired:
+                raise BudgetExceeded("unit-fixture deadline expired")
+        before = self.path.read_bytes()
+        with patch.object(self.sandbox, "_apply", side_effect=apply) as apply_call:
+            event = self.gateway.execute(self.config(), check_budget=check)
+            self.assertEqual(apply_call.call_count, 1)
+        self.assertEqual((event["decision"], event["outcome"], event["reason"]), ("DENY", "DENIED", "budget_exceeded"))
+        self.assert_unchanged(event, self.initial, before)
+        self.assert_event_hash(event)
 
     def test_v0_harmful_and_safe_workflows_match_preview_and_committed_state(self):
         for name, limit, production, safe in (("harmful", 6, 6, False), ("safe", 4, 8, True)):

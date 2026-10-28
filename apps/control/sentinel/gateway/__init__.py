@@ -32,7 +32,7 @@ class Gateway:
         self._policy_hash = policy_hash
         self.events: list[dict] = []
 
-    def execute(self, proposal: dict, *, expected_state_version: int | None = None) -> dict:
+    def execute(self, proposal: dict, *, expected_state_version: int | None = None, check_budget=None) -> dict:
         """Validate, preview, authorize and commit under one SQLite write lock."""
         action = preview = before = after = None
         decision, outcome, reason = "DENY", "DENIED", "invalid_action"
@@ -100,9 +100,20 @@ class Gateway:
 
                 decision, reason = "ALLOW", policy_decision.reason
                 stage = "execution"
+                def budget_check():
+                    if check_budget is not None:
+                        try:
+                            remaining = check_budget()
+                            if type(remaining) in (int, float):
+                                db.execute(f"PRAGMA busy_timeout = {max(0, min(5000, int(remaining * 1000)))}")
+                        except Exception as error:
+                            reason = "budget_exceeded" if getattr(error, "error_category", None) == "BUDGET_EXCEEDED" else "budget_check_error"
+                            raise _Denied(reason, type(error).__name__) from error
+                budget_check()
                 after = self._sandbox._apply(db, action, preview.state_version)
                 if after != preview.projected_state:
                     raise RuntimeError("committed transition differs from preview")
+                budget_check()
                 # SQL readback becomes committed only when the context exits successfully.
             outcome = "EXECUTED"
         except _Denied as denial:

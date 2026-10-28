@@ -56,6 +56,8 @@ class AgentContext:
     initial_observation: dict
     objective: str
     max_actions: int = 10
+    seed: int = 0
+    policy: dict | None = None
 
 
 @dataclass(frozen=True)

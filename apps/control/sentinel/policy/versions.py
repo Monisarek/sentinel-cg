@@ -110,12 +110,16 @@ class PolicyRegistry:
             yield self._version(db)
 
     def consider(self, candidate, initial: SandboxState, task: TaskContract,
-                 original_proposals: list[dict], output_root: Path) -> dict:
+                 original_proposals: list[dict], output_root: Path, *,
+                 input_evidence_kind: str = "deterministic_test_fixture", check_budget=None) -> dict:
         """Evaluate a candidate internally; no API accepts a caller-supplied PASS."""
         with closing(self._connect()) as db:
             context, before = self._context(db), self._version(db)
         report, patch, reason, category = None, None, "verification_failed", None
+        error_category = None
         try:
+            if check_budget is not None:
+                check_budget()
             patch = validate_patch(candidate.to_dict() if type(candidate) is CandidatePolicyPatch else candidate)
             if before.version_id != "v0":
                 raise ValueError("the core repair already has an active verified version")
@@ -123,7 +127,8 @@ class PolicyRegistry:
                 raise ValueError("verification context differs from the frozen registry context")
             if context["frozen_suite_hashes"] != frozen_suite_hashes():
                 raise ValueError("frozen evaluation suites changed before verification")
-            report = evaluate_candidate(patch, initial, task, original_proposals, output_root)
+            report = evaluate_candidate(patch, initial, task, original_proposals, output_root,
+                                        input_evidence_kind=input_evidence_kind)
             passed = (report["status"] == "PASS" and bool(report["checks"])
                       and all(value is True for value in report["checks"].values())
                       and report["candidate_patch"] == patch.to_dict()
@@ -131,7 +136,9 @@ class PolicyRegistry:
             reason = "verification_passed" if passed else "verification_failed"
         except Exception as error:
             passed, reason, category = False, "verification_error", type(error).__name__
+            error_category = getattr(error, "error_category", "VERIFICATION_ERROR")
         receipt = {"status": "FAIL", "promoted": False, "reason": reason, "error_type": category,
+                   "error_category": error_category,
                    "candidate_hash": digest(patch.to_dict()) if patch else None,
                    "verification_hash": digest(report) if report is not None else None,
                    "verification_path": str((Path(output_root) / "evidence.json").resolve()) if report else None,
@@ -145,6 +152,13 @@ class PolicyRegistry:
             if context["frozen_suite_hashes"] != frozen_suite_hashes():
                 passed, receipt["reason"] = False, "frozen_suites_changed_during_verification"
             receipt.update(active_version=current.version_id, policy_hash=current.policy_hash)
+            if passed and check_budget is not None:
+                try:
+                    check_budget()
+                except Exception as error:
+                    passed, receipt["reason"] = False, "promotion_budget_check_failed"
+                    receipt["error_type"] = type(error).__name__
+                    receipt["error_category"] = getattr(error, "error_category", "VERIFICATION_ERROR")
             if passed:
                 policy_hash = digest({"base_policy": "v0", "engine_hash": context["engine_hash"], **patch.to_dict()})
                 receipt.update(status="PASS", promoted=True, active_version="v1", policy_hash=policy_hash)
@@ -163,7 +177,7 @@ class VersionedGateway:
         self.registry, self.sandbox, self.task = registry, sandbox, task
         self.events = []
 
-    def execute(self, proposal, *, expected_state_version=None):
+    def execute(self, proposal, *, expected_state_version=None, check_budget=None):
         with ExitStack() as locks:
             try:
                 version = locks.enter_context(self.registry.locked_active())
@@ -174,4 +188,4 @@ class VersionedGateway:
                     raise RuntimeError("active policy integrity could not be verified")
                 gateway = Gateway(self.sandbox, self.task, policy=unavailable, policy_id="unavailable")
             gateway.events = self.events
-            return gateway.execute(proposal, expected_state_version=expected_state_version)
+            return gateway.execute(proposal, expected_state_version=expected_state_version, check_budget=check_budget)
