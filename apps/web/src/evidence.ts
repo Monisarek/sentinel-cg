@@ -38,6 +38,7 @@ export type Bundle = {
   pipeline_status: string; re_attack_outcome: string; policy_assurance_status: string;
   project_git_commit: string; working_tree_dirty: boolean; initial_state_hash: string; bundle_hash: string;
   provider: string; original_proposals: Proposal[]; gates: Record<string, string>;
+  evaluation_variant: string; evaluation_protocol_id: string; evaluation_protocol_hash: string;
   candidate: { patch: Patch | null; receipt: Receipt | null; verification: Verification | null };
   negative_control: { receipt: Receipt; verification: Verification | null } | null;
   safe_repair_after_promotion: { passed: boolean; final_state: Snapshot } | null;
@@ -221,6 +222,9 @@ export function normalizeEvidence(value: unknown): Bundle {
     pipeline_status: text(raw.pipeline_status, raw.runtime_status === "COMPLETED" ? "COMPLETED" : ["BLOCKED", "STOPPED"].includes(text(raw.runtime_status)) ? "STOPPED" : raw.status === "FAIL" ? "FAILED" : "PENDING"),
     re_attack_outcome: outcome, policy_assurance_status: assurance,
     real_model_call: raw.real_model_call === true, provider: text(raw.provider, "None"),
+    evaluation_variant: text(raw.evaluation_variant, fixture ? "deterministic_test_fixture" : "unregistered"),
+    evaluation_protocol_id: text(object(object(raw.evaluation_protocol).protocol).protocol_id, "Unrecorded"),
+    evaluation_protocol_hash: text(object(raw.evaluation_protocol).protocol_hash, "Unrecorded"),
     project_git_commit: text(raw.project_git_commit, "Unrecorded"), working_tree_dirty: raw.working_tree_dirty === true,
     initial_state_hash: text(raw.initial_state_hash), bundle_hash: text(raw.bundle_hash), original_proposals: machine ? trace : [], gates,
     candidate: { patch: candidatePatch, receipt: receipt(meta ? verificationStage : candidate.receipt), verification: verification(evaluation) },

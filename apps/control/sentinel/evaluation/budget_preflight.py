@@ -12,8 +12,8 @@ from apps.control.sentinel.agents.budget import ApprovedBudget, Pricing, ROLES
 REFERENCE = Path(__file__).resolve().parents[4] / "evals/meta_model_reference.json"
 
 
-def check_meta_budget(config: Path, *, key_present=None) -> dict:
-    data = json.loads(Path(config).read_text(encoding="utf-8"))
+def check_meta_budget(config: Path, *, key_present=None, config_bytes: bytes | None = None) -> dict:
+    data = json.loads(config_bytes if config_bytes is not None else Path(config).read_bytes())
     reference = json.loads(REFERENCE.read_text(encoding="utf-8"))
     if type(data) is not dict:
         raise ValueError("authorization configuration must be an object")

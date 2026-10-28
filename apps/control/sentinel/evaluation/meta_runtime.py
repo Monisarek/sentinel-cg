@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 from dataclasses import asdict
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -10,10 +11,12 @@ import time
 from uuid import uuid4
 
 from apps.control.sentinel.agents.budget import ApprovedBudget, RuntimeBudget, Pricing, BudgetExceeded
-from apps.control.sentinel.agents.contracts import InferenceSchemaError, ProviderBlocked, ProviderError
+from apps.control.sentinel.agents.contracts import ACTION_SCHEMA, InferenceSchemaError, ProviderBlocked, ProviderError
 from apps.control.sentinel.agents.loop import explore
-from apps.control.sentinel.agents.meta import MetaAgentDriver, MetaPolicySynthesizer
+from apps.control.sentinel.agents.meta import TOOLS, MetaAgentDriver, MetaPolicySynthesizer
 from apps.control.sentinel.evaluation.assurance import assess_re_attack
+from apps.control.sentinel.evaluation.budget_preflight import check_meta_budget
+from apps.control.sentinel.evaluation.protocol import verify_protocol
 from apps.control.sentinel.evaluation.promotion import frozen_suite_hashes
 from apps.control.sentinel.policy.dsl import policy_schema
 from apps.control.sentinel.policy.versions import PolicyRegistry, digest
@@ -30,10 +33,10 @@ class BudgetNotAuthorized(ProviderError):
     error_category = "BUDGET_NOT_AUTHORIZED"
 
 
-def load_authorization(path: Path | None):
+def load_authorization(path: Path | None, *, config_bytes: bytes | None = None):
     if path is None:
         raise BudgetNotAuthorized("No paid execution budget has been authorized")
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    data = json.loads(config_bytes if config_bytes is not None else Path(path).read_bytes())
     if type(data) is not dict or data.get("authorized") is not True:
         raise BudgetNotAuthorized("Configured limits do not authorize paid model calls")
     budget_fields = set(ApprovedBudget.__dataclass_fields__)
@@ -100,14 +103,17 @@ def _validate_calls(calls, fixture):
 
 def _execute_cycle(directory: Path, budget: RuntimeBudget, models: dict, seed: int, *,
                    driver_factory=MetaAgentDriver, synthesizer_factory=MetaPolicySynthesizer,
-                   evidence_kind="genuine_live_provider_run") -> dict:
+                   evidence_kind="genuine_live_provider_run", protocol_binding=None) -> dict:
     """Factories support explicit unit fixtures; the live CLI never exposes them."""
     if evidence_kind not in ("genuine_live_provider_run", "deterministic_test_fixture"):
         raise ValueError("unknown runtime evidence kind")
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     fixture = evidence_kind == "deterministic_test_fixture"
+    live_evaluation = not fixture and protocol_binding is not None
     evidence = _base_evidence(directory, seed, evidence_kind)
+    evidence["evaluation_variant"] = "deterministic_test_fixture" if fixture else "neutral_primary" if protocol_binding else "unbound_development"
+    evidence["evaluation_protocol"] = deepcopy(protocol_binding)
     initial, task = seeded_state(seed)
     registry = PolicyRegistry.create(directory / "policies.sqlite3", initial, task)
     evidence["frozen_suite_hashes"] = frozen_suite_hashes()
@@ -163,10 +169,10 @@ def _execute_cycle(directory: Path, budget: RuntimeBudget, models: dict, seed: i
             evidence["runtime_status"] = "NO_VERIFIED_COUNTEREXAMPLE_FOUND"
             evidence["pipeline_status"] = "FAILED"
             evidence["runtime_checks"]["verified_discovery"] = False
-            evidence["gates"]["G3"] = "PENDING" if fixture else "FAIL"
+            evidence["gates"]["G3"] = "FAIL" if live_evaluation else "PENDING"
             return evidence
         evidence["runtime_checks"]["verified_discovery"] = True
-        evidence["gates"]["G3"] = "PENDING" if fixture else "PASS"
+        evidence["gates"]["G3"] = "PASS" if live_evaluation else "PENDING"
         trace = [event["proposal"] for event in red["policy_decisions"]]
         phase = "blue"
         budget.begin_stage("blue")
@@ -181,7 +187,7 @@ def _execute_cycle(directory: Path, budget: RuntimeBudget, models: dict, seed: i
                                       "model_calls": deepcopy(blue.calls), "evidence_kind": evidence_kind}
         _validate_calls(blue.calls, fixture)
         evidence["runtime_checks"]["validated_synthesis"] = True
-        evidence["gates"]["G4_AI"] = "PENDING" if fixture else "PASS"
+        evidence["gates"]["G4_AI"] = "PASS" if live_evaluation else "PENDING"
         checkpoint()
         phase = "verification"
         receipt = registry.consider(candidate, initial, task, trace, directory / "verification",
@@ -228,7 +234,7 @@ def _execute_cycle(directory: Path, budget: RuntimeBudget, models: dict, seed: i
         evidence.update(assessment)
         evidence["runtime_checks"]["no_verified_counterexample_on_re_attack"] = (
             evidence["policy_assurance_status"] == "NO_COUNTEREXAMPLE_FOUND_WITHIN_BUDGET")
-        evidence["gates"]["G7_AI"] = ("PENDING" if fixture else
+        evidence["gates"]["G7_AI"] = ("PENDING" if not live_evaluation else
             "PASS" if evidence["runtime_checks"]["fresh_re_attack_completed"] else "FAIL")
         evidence["status"] = "PASS" if all(evidence["runtime_checks"].values()) else "FAIL"
         evidence["runtime_status"] = "COMPLETED"
@@ -242,7 +248,7 @@ def _execute_cycle(directory: Path, budget: RuntimeBudget, models: dict, seed: i
             evidence["runtime_checks"]["fresh_re_attack_completed"] = False
             assessment.pop("fresh_re_attack_completed")
             evidence.update(assessment)
-            evidence["gates"]["G7_AI"] = "PENDING" if fixture else "FAIL"
+            evidence["gates"]["G7_AI"] = "FAIL" if live_evaluation else "PENDING"
         evidence["error_category"] = getattr(failure, "error_category", "RUNTIME_ERROR")
         if phase in ("red", "reattack") and evidence["stages"][phase]:
             evidence["error_category"] = evidence["stages"][phase].get("error_category") or evidence["error_category"]
@@ -264,7 +270,24 @@ def run_meta(output_root: Path, authorization_file: Path | None = None, *, seed:
     if not os.getenv("MODEL_API_KEY", "").strip():
         evidence["blocked_reasons"].append("MODEL_API_KEY_MISSING")
     try:
-        approval, pricing, models = load_authorization(authorization_file)
+        authorization_bytes = Path(authorization_file).read_bytes() if authorization_file is not None else None
+        approval, pricing, models = load_authorization(authorization_file, config_bytes=authorization_bytes)
+        if not evidence["blocked_reasons"]:
+            preflight = check_meta_budget(authorization_file, key_present=True, config_bytes=authorization_bytes)
+            evidence["budget_preflight"] = preflight
+            if preflight["status"] != "PASS":
+                raise ValueError("Paid execution failed the local budget preflight")
+            binding = verify_protocol(TOOLS, ACTION_SCHEMA, policy_schema(), models=models,
+                                      discovery_seed=seed, authorization_hash=sha256(authorization_bytes).hexdigest())
+            limits = binding["protocol"]["limits"]
+            if any(approval.stage_calls[role] > limits[role]["max_model_calls"]
+                   or approval.stage_seconds[role] > limits[role]["max_seconds"] for role in ("red", "blue", "reattack")):
+                raise ValueError("Approved stage ceilings exceed the frozen evaluation protocol")
+            if (approval.cycle_calls > limits["cycle"]["max_model_calls"]
+                    or approval.cycle_seconds > limits["cycle"]["max_seconds"]
+                    or approval.max_completion_tokens > limits["cycle"]["max_completion_tokens"]):
+                raise ValueError("Approved cycle ceilings exceed the frozen evaluation protocol")
+            evidence["evaluation_variant"], evidence["evaluation_protocol"] = "neutral_primary", binding
     except Exception as failure:
         evidence["blocked_reasons"].append(getattr(failure, "error_category", "AUTHORIZATION_CONFIG_INVALID"))
         evidence["authorization_error"] = {"error_type": type(failure).__name__,
@@ -280,7 +303,7 @@ def run_meta(output_root: Path, authorization_file: Path | None = None, *, seed:
     _save(directory, evidence)
     try:
         budget = RuntimeBudget(ROOT / ".cache/meta-spend.sqlite3", directory.name, approval, pricing)
-        return _execute_cycle(directory, budget, models, seed)
+        return _execute_cycle(directory, budget, models, seed, protocol_binding=binding)
     except Exception as failure:
         evidence = json.loads((directory / "evidence.json").read_text(encoding="utf-8"))
         evidence.update(status="FAIL", runtime_status="STOPPED", pipeline_status="STOPPED",

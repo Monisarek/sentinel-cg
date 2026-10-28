@@ -3,6 +3,7 @@
 *.py text eol=lf
 *.json text eol=lf
 *.toml text eol=lf
+prompts/*.txt text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
 .env.example text eol=lf
