@@ -4,10 +4,14 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
 from apps.control.sentinel.api.app import create_app
+from apps.control.sentinel.agents.budget import RuntimeBudget
+from apps.control.sentinel.evaluation.meta_runtime import _execute_cycle
+from tests.test_meta_runtime import FixtureHarness, MODELS, approval, prices, run_fixture
 
 
 class EvidenceAPITests(unittest.TestCase):
@@ -78,6 +82,31 @@ class EvidenceAPITests(unittest.TestCase):
             self.assertEqual(self.client.get("/api/runs/" + run_id).status_code, 404)
         self.assertEqual(self.client.post("/api/policies/activate", json={"status": "PASS"}).status_code, 404)
         self.assertEqual(self.client.post("/api/sandbox/apply", json={"name": "restart_service"}).status_code, 404)
+
+    def test_download_preserves_original_json_bytes(self):
+        original = (self.root / self.run_id / "evidence.json").read_bytes()
+        self.assertEqual(self.client.get("/api/runs/" + self.run_id + "/download").content, original)
+
+    def test_full_and_partial_meta_runtime_formats_keep_honest_provenance(self):
+        full = run_fixture(self.root)
+        directory = self.root / ("meta-runtime-fixture-" + uuid4().hex)
+        harness = FixtureHarness(red_mode="stop")
+        budget = RuntimeBudget(self.root / "fixture-ledger.sqlite3", directory.name, approval(), prices())
+        partial = _execute_cycle(directory, budget, MODELS, 0, driver_factory=harness.driver,
+                                 synthesizer_factory=harness.synthesizer, evidence_kind="deterministic_test_fixture")
+        for source in (full, partial):
+            prefix = "/api/runs/" + source["run_id"]
+            response = self.client.get(prefix)
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json(), json.loads(json.dumps(source)))
+            self.assertEqual(source["evidence_kind"], "deterministic_test_fixture")
+            self.assertFalse(source["real_model_call"])
+            self.assertTrue(all(source["gates"][name] == "PENDING" for name in ("G3", "G4_AI", "G7_AI")))
+            self.assertEqual(self.client.get(prefix + "/download").content,
+                             (self.root / source["run_id"] / "evidence.json").read_bytes())
+        self.assertIsNotNone(full["stages"]["replay"])
+        self.assertIsNone(partial["stages"]["replay"])
+        self.assertNotIn("event: gateway", self.client.get("/api/runs/" + partial["run_id"] + "/events").text)
 
 
 if __name__ == "__main__":
