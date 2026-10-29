@@ -9,6 +9,9 @@ files, spending ledgers, dependencies, or billing credentials.
    a trusted channel. File hashes establish integrity, not authenticity. Review
    `source_commit`, `verifier_commit`, provenance, and `source_working_tree_dirty`.
    A dirty source run is disclosed; its uncommitted changes are not in Git.
+   Default exports have `export_grade=development`. `--competition` rejects a
+   dirty source run or exporter checkout. This grade concerns source provenance;
+   it never changes fixture labels or acceptance gates.
 2. Explicitly clone the source bundle and check out the trusted verifier commit:
 
    ```text
@@ -40,6 +43,10 @@ To export a completed or stopped run from a trusted checkout:
 ```text
 python -B -m scripts.export_evidence /path/to/run/evidence.json /path/to/new-package
 ```
+
+For a competition-grade export, use a clean checkout and append `--competition`.
+Missing genuine Meta stages still block the final competition release, even if
+an individual fixture artifact has clean source provenance.
 
 The exporter rejects unresolved source commits, changing files, SQLite sidecars,
 credential fields, and symlinks. The package intentionally excludes the persistent

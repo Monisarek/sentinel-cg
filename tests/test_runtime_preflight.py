@@ -56,6 +56,9 @@ class RuntimePreflightTests(unittest.TestCase):
         self.assertNotEqual(binding["authorization_hash"], sha256(self.path.read_bytes()).hexdigest())
         self.assertFalse(binding["authorizes_spending"])
         self.assertEqual(binding["protocol"]["scenario_seeds"]["discovery"], 0)
+        preflight = execute.call_args.kwargs["budget_preflight"]
+        self.assertEqual(preflight["status"], "PASS")
+        self.assertEqual(preflight["caps"]["stage_usd"]["blue"], "5")
 
     def test_unknown_model_prices_and_protocol_limits_stop_before_ledger_or_transport(self):
         variants = ["unofficial-price", "unregistered-seed", "stage-calls", "cycle-seconds"]

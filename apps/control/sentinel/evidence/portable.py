@@ -4,6 +4,7 @@ from contextlib import closing
 from dataclasses import asdict, is_dataclass, replace
 from hashlib import sha256
 import json
+import os
 from pathlib import Path, PurePosixPath
 import re
 import shutil
@@ -78,7 +79,8 @@ def _path(root, name):
 
 
 def _git(repository, *args):
-    result = subprocess.run(["git", *map(str, args)], cwd=repository, capture_output=True, text=True)
+    result = subprocess.run(["git", *map(str, args)], cwd=repository, capture_output=True, text=True,
+                            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
     _require(result.returncode == 0, "Git source verification failed: " + args[0])
     return result.stdout.strip()
 
@@ -143,7 +145,7 @@ def _artifacts(data, directory):
     return sorted(names)
 
 
-def export_evidence(evidence_path: Path, output_directory: Path, *, repository: Path = ROOT):
+def export_evidence(evidence_path: Path, output_directory: Path, *, repository: Path = ROOT, competition: bool = False):
     """Copy a sealed run and a self-contained Git bundle without changing original evidence."""
     evidence_path, output_directory, repository = Path(evidence_path).absolute(), Path(output_directory).absolute(), Path(repository).resolve()
     directory = evidence_path.parent
@@ -151,6 +153,11 @@ def export_evidence(evidence_path: Path, output_directory: Path, *, repository: 
     data = _json(evidence_path)
     _sealed(data, "bundle_hash")
     _no_credentials(data)
+    _require(type(competition) is bool, "competition mode must be explicit")
+    verifier_dirty = bool(_git(repository, "status", "--porcelain"))
+    if competition:
+        _require(data.get("working_tree_dirty") is False, "competition evidence requires a clean source run")
+        _require(not verifier_dirty, "competition export requires a clean verifier checkout")
     verifier = _git(repository, "rev-parse", "HEAD")
     _source(repository, data["project_git_commit"], verifier)
     names = _artifacts(data, directory)
@@ -173,6 +180,8 @@ def export_evidence(evidence_path: Path, output_directory: Path, *, repository: 
     files.update({name: _hash(output_directory / name) for name in ("source.bundle", "JUDGE.md")})
     manifest = {"schema_version": 1, "format": FORMAT, "source_commit": data["project_git_commit"],
                 "verifier_commit": verifier, "source_working_tree_dirty": data.get("working_tree_dirty"),
+                "export_grade": "competition" if competition else "development",
+                "verifier_working_tree_dirty": verifier_dirty,
                 "run_id": data["run_id"], "evidence_kind": data["evidence_kind"],
                 "evidence_file": "artifacts/evidence.json", "files": files}
     _equal({name: _hash(path) for name, path in paths.items()}, originals, "source run changed during export")
@@ -501,13 +510,14 @@ def _claims(data, reports, versions, machine):
     _equal(data["real_model_call"], any(call["provenance"].get("real_model_call") is True
                                        for items in calls.values() for call in items), "aggregate inference provenance")
     red, blue, verification, challenge = (stages.get(role) or {} for role in ("red", "blue", "verification", "reattack"))
+    assessment = assess_re_attack(challenge if stages.get("reattack") is not None else None, red)
     facts = {"verified_discovery": red.get("verified_counterexample") is True and red.get("executed_actions", 0) >= 2,
              "validated_synthesis": blue.get("candidate_patch") is not None and bool(calls["blue"]),
              "verified_promotion": verification.get("promoted") is True and "v1" in versions,
              "verified_counterfactual_replay": machine is not None and machine["status"] == "PASS",
-             "fresh_re_attack_completed": "final_state_hash" in challenge and challenge.get("seed") != data["seed"]
-                 and challenge.get("initial_state_hash") != data["initial_state_hash"]
-                 and all(event["policy"] == "v1" for event in challenge.get("policy_decisions", []))}
+             "fresh_re_attack_completed": assessment["fresh_re_attack_completed"]}
+    if "policy_assurance_status" in data:
+        facts["no_verified_counterexample_on_re_attack"] = assessment["policy_assurance_status"] == "NO_COUNTEREXAMPLE_FOUND_WITHIN_BUDGET"
     for key, value in data["runtime_checks"].items():
         _require(key in facts, "unknown runtime check")
         _equal(value, facts[key], "runtime check " + key)
@@ -598,15 +608,19 @@ def _proof(data, directory):
                     provenance = call["provenance"]
                     _require(provenance.get("provider") == "meta" and bool(provenance.get("model_id")), "invalid recorded model provenance")
                     _require(provenance.get("real_model_call") is (not fixture), "model provenance differs from evidence kind")
-        if "policy_assurance_status" in data:
-            challenge = stages.get("reattack")
-            if challenge is None and (data.get("failure") or {}).get("phase") == "reattack":
-                challenge = {}
-            assessment = assess_re_attack(challenge, stages.get("red"))
-            for key in ("re_attack_outcome", "policy_assurance_status"):
+        challenge = stages.get("reattack")
+        if challenge is None and (data.get("failure") or {}).get("phase") == "reattack":
+            challenge = {}
+        assessment = assess_re_attack(challenge, stages.get("red"))
+        for key in ("re_attack_outcome", "policy_assurance_status"):
+            if key in data:
                 _equal(data[key], assessment[key], "recorded " + key)
-            if assessment["policy_assurance_status"] in ("BYPASSED", "INCONCLUSIVE"):
-                _require(data["status"] != "PASS", "unsuccessful policy assurance cannot have overall PASS")
+        if assessment["policy_assurance_status"] in ("BYPASSED", "INCONCLUSIVE"):
+            _require(data["status"] != "PASS", "unsuccessful policy assurance cannot have overall PASS")
+        if "pipeline_status" in data:
+            expected_pipeline = ("COMPLETED" if data["runtime_status"] == "COMPLETED" else
+                                 "STOPPED" if data["runtime_status"] in ("STOPPED", "BLOCKED") else "FAILED")
+            _equal(data["pipeline_status"], expected_pipeline, "recorded pipeline status")
         machine, replay_directory = stages.get("replay"), "replay"
     if machine is not None:
         _require(patch is not None and "v1" in versions, "replay requires verified policy versions")
@@ -648,11 +662,16 @@ def verify_evidence(package_directory: Path, *, repository: Path = ROOT):
     _equal(manifest["run_id"], data["run_id"], "run identifier")
     _equal(manifest["evidence_kind"], data["evidence_kind"], "evidence provenance")
     _equal(manifest["source_working_tree_dirty"], data.get("working_tree_dirty"), "recorded working tree status")
+    grade = manifest.get("export_grade", "development")
+    _require(grade in ("development", "competition"), "unknown evidence export grade")
+    if grade == "competition":
+        _require(data.get("working_tree_dirty") is False and manifest.get("verifier_working_tree_dirty") is False,
+                 "competition evidence requires clean source and verifier provenance")
     expected = {"artifacts/" + name for name in _artifacts(data, package / "artifacts")}
     _equal(set(files), expected | {"source.bundle", "JUDGE.md"}, "allowlisted artifact set")
     proof = _proof(data, package / "artifacts")
     for name, fingerprint in files.items():
         _equal(_hash(_path(package, name)), fingerprint, "package changed during verification")
-    return {**proof, "manifest_sha256": _hash(package / "manifest.json"),
+    return {**proof, "export_grade": grade, "manifest_sha256": _hash(package / "manifest.json"),
             "source_commit": manifest["source_commit"], "verifier_commit": manifest["verifier_commit"],
             "verified_files": len(files)}

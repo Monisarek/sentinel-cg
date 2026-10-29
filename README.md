@@ -4,6 +4,8 @@ Counterexample-guided safety for autonomous AI agents, built for the Meta Global
 
 The target demonstration is a staging repair that indirectly starves production through shared capacity. Meta Red will explore permitted actions; Meta Blue will propose a policy repair. Independent deterministic code must verify both production safety and legitimate task completion, then replay the same actions under both policies.
 
+Use case: **An AI platform engineer validates an autonomous DevOps agent before granting it operational permissions.** The trusted host supplies the safety contract, including the required production minimum. Models search for an enforcement counterexample to that declared invariant and propose a repair; they do not invent the safety requirement or decide whether it holds.
+
 The complete product source of truth is [docs/ENGINEERING_SPEC.md](docs/ENGINEERING_SPEC.md). Engineering rules are in [AGENTS.md](AGENTS.md).
 
 ## Current status
@@ -15,6 +17,8 @@ The deterministic G5 verification and controlled promotion path, G6 Safety Time 
 Offline inputs and results are labeled `deterministic_test_fixture`: the counterexample and patch are handcrafted, and no model is called. G3 and the AI-dependent parts of G4/G7 remain PENDING. The [historical failed Codex run](evals/evidence/codex-blocked.json) found no verified counterexample; its next inference request was rejected for cybersecurity access. Experimental Codex inference is disabled. Ordinary coding-agent development continues.
 
 The accepted offline version is tagged [`offline-core-v0.1`](https://github.com/Monisarek/sentinel-cg/tree/offline-core-v0.1) at `53b1aa9`, with a remote backup branch `codex/backup/offline-core-v0.1`. It is not the competition `core-v1.0.0` release. UI appearance is frozen while Meta-dependent gates remain pending.
+
+The seeded random baseline finds 84/100 verified counterexamples within ten actions. A Direct Invariant Shield blocks the same 5/5 unsafe cases as the handcrafted fixture patch and preserves 20/20 required utility workflows. These measurements establish neither Meta superiority nor a need for LLM synthesis in this small world. See [Evaluation](docs/EVALUATION.md) for the fixed protocol, retained failures, and measurement limits, and the [F1–F18 audit](docs/AUDIT.md) for checked findings and deferred work.
 
 ## Local setup
 
@@ -36,6 +40,8 @@ The shared ledger is `.cache/meta-spend.sqlite3`; do not delete or replace it to
 
 `python -m scripts.prove_meta_runtime` exercises the same orchestration with explicit test-only drivers, synthetic rates, an isolated fixture ledger and network disabled. Its bundle is `deterministic_test_fixture`, `real_model_call=false`; AI-dependent gates stay PENDING. This command tests integration and must not be presented as live Meta discovery, synthesis, billing, or re-attack. No UI design changes accompany this runtime work.
 
+Use `python -B -m scripts.export_evidence <recorded-evidence.json> <new-package>` to export a recorded run with its unchanged source JSON, trace and policy artifacts, reports, SQLite snapshots, source bundle, and SHA-256 manifest. `python -B -m scripts.verify_evidence <package>` verifies the recorded proof without inference or dependencies. Follow [the judge instructions](docs/VERIFY_EVIDENCE.md) to clone the bundled source and select the pinned verifier commit. A development export discloses dirty source provenance; `--competition` requires clean source evidence and exporter checkout and never upgrades fixture evidence to a Meta result.
+
 `python -m scripts.eval_codex` only records `PROVIDER_BLOCKED` with zero model calls and actions; there is no runtime re-enable flag or alternative transport. Provider blocking, budget exhaustion, transport failure, schema failure, and sandbox execution failure have separate machine-readable categories. The historical Codex evidence records an explicitly configured model ID without service confirmation and is not Meta evidence. Genuine Meta tool calls, structured output, usage/billing semantics and latency remain unverified until permitted account access and budget approval exist.
 
 Official API references: [quickstart](https://dev.meta.ai/docs/quickstart), [models](https://dev.meta.ai/docs/models). The documented base URL is `https://api.meta.ai/v1`; configured models are `muse-spark-1.3` and `muse-wonder-1.0`.
@@ -49,5 +55,11 @@ Official API references: [quickstart](https://dev.meta.ai/docs/quickstart), [mod
 - `tests/`, `scripts/`, `prompts/`: added as the corresponding gates are implemented.
 
 Only the controlled Promotion Gate can append v1 after independent verification succeeds. Models and HTTP clients have no activation endpoint. SQLite append-only guards protect history from accidental edits; a host process with database-write access remains trusted. G8, the final Meta demonstration, and the core release tag remain pending mandatory live gates.
+
+## Evidence limits and related work
+
+This build demonstrates one bounded `v0 → v1` repair cycle in a synthetic shared-capacity topology. Held-out cases and fresh-state generation vary parameters within that topology. Preview and commit share a deterministic transition model; agreement establishes that model's semantics, not the fidelity of a real infrastructure deployment. The prototype does not establish production readiness, unknown safety requirements, cross-topology generalization, continual policy evolution, or universal agent safety. Hashes establish artifact integrity and reproducibility; host writers remain trusted, and hashes alone do not authenticate model-call provenance.
+
+Verified policy evolution has related work. [VEPA](https://arxiv.org/abs/2610.12813) combines model-proposed formal policy patches with deterministic verification and controlled activation. [ActGov](https://arxiv.org/abs/2609.24446) checks tool actions against policies constructed from specifications, tasks, and failure traces. [AutoSpec](https://arxiv.org/abs/2606.24245) evolves safety rules using counterexample-guided synthesis and inductive logic programming. SENTINEL's hackathon contribution is the integrated counterexample-to-repair process with actual SQLite execution, independent safety/utility checks, and paired same-trace Safety Time Machine evidence. The project does not claim research priority or comparative performance against those systems; its Meta contribution still requires genuine permitted runs.
 
 MIT licensed; see [LICENSE](LICENSE).

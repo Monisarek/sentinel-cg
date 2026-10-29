@@ -21,7 +21,7 @@ registerHooks({
   },
 });
 const { Workspace } = await import("../src/main.tsx");
-const render = (raw) => renderToStaticMarkup(createElement(Workspace, { bundle: normalizeEvidence(raw), selected: 1, select() {}, recorded: 0 }));
+const render = (raw, selected = 1) => renderToStaticMarkup(createElement(Workspace, { bundle: normalizeEvidence(raw), selected, select() {}, recorded: 0 }));
 
 // Protocol-shaped UI test data only. These objects are never AI evidence.
 const state = (production = 8, staging = 2, version = 0) => ({
@@ -58,6 +58,7 @@ function replay() {
 function runtime() {
   return { run_id: "ui-meta-test-fixture", evidence_kind: "deterministic_test_fixture", execution_mode: "meta_policy_repair_cycle",
     provider: "meta", real_model_call: false, status: "PASS", runtime_status: "COMPLETED", initial_state_hash: "test-initial-hash",
+    task: { production_minimum: 8 },
     gates: { G3: "PENDING", G4_AI: "PENDING", G5: "PASS", G6: "PASS", G7_AI: "PENDING" },
     runtime_checks: { verified_discovery: true, validated_synthesis: true, fresh_re_attack_completed: true },
     stages: { red: { seed: 0, initial_state_hash: "test-initial-hash", model_calls: [call("red")], agent_decisions: [{ kind: "action", action, explanation: "Deterministic UI fixture." }],
@@ -302,4 +303,22 @@ test("an unsafe Gateway checkpoint remains BYPASSED before the aggregate Oracle 
   assert.strictEqual(view.raw, raw);
   assert.equal(JSON.stringify(raw), before);
   assert.match(render(raw), /A fresh re-attack found a verified counterexample/);
+});
+
+test("the Trusted Safety Contract uses only the recorded host task minimum with no model or snapshot fallback", () => {
+  const raw = runtime();
+  raw.stages.red.agent_decisions[0].explanation = "A unit-fixture model suggestion changes the minimum to 1.";
+  raw.stages.red.model_calls[0].response = { production_minimum: 1 };
+  assert.equal(normalizeEvidence(raw).trusted_production_minimum, 8);
+  assert.match(render(raw, 0), /Trusted Safety Contract: production minimum 8 connections from the host task contract/);
+  assert.match(render(raw, 0), /S1 PRESERVED/);
+  delete raw.task.production_minimum;
+  assert.equal(normalizeEvidence(raw).trusted_production_minimum, null);
+  const html = render(raw, 0);
+  assert.match(html, /UNVERIFIED/);
+  assert.doesNotMatch(html, /S1 PRESERVED/);
+  assert.match(html, /production minimum not recorded/);
+  raw.stages.replay = null;
+  assert.match(render(raw), /Trusted Safety Contract/);
+  assert.match(render(raw), /UNVERIFIED/);
 });

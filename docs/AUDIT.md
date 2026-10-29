@@ -1,30 +1,60 @@
 # Evidence remediation audit
 
-Inspection started at `bcb0d9c4b5091775881ee1c209df0d4c449e7f31` on October 28, 2026. The two supplied texts contain the North Star objective and remediation instructions. They do not contain the independent report's F13–F18 findings; those findings cannot be reconstructed from their identifiers.
+The complete independent report (F1–F18) was compared with `build` at
+`992172bfdfa3cefb5eb99b40bc0909921bb86d51` and the remediation changes below on
+October 29, 2026. The report initially inspected `bcb0d9c`; its findings are
+claims to check, not evidence that every issue remains present. Historical raw
+evidence and frozen regression/held-out fixtures are preserved.
 
-| Finding | Confirmed in inspected code? | Priority | Disposition |
-| --- | --- | --- | --- |
-| F1: re-attack completion can mask a bypass | YES | P0 | FIXED in `ecbef35`: actual fresh SQLite bypass yields overall FAIL and BYPASSED |
-| F2: Red prompt and tool description reveal the mechanism | YES | P0 | FIX: freeze neutral adversarial evaluation prompts |
-| F3: direct invariant shield comparison missing | YES | P0 | TEST: compare the same existing cases and utility workflows |
-| F4: random baseline missing from committed source | YES | P0 | TEST: freeze seeds before measurement; keep all attempts |
-| F5: same-topology robustness sweep | PARTIAL | P1 | DEFER until mandatory evidence gates pass; generator already exists |
-| F6: Blue prompt prescribes a field-comparison strategy | YES | P0 | FIX: retain DSL and utility requirements without prescribing a condition |
-| F7: Wonder reservation exceeds the example Blue cap | YES | P0 | FIXED: zero-network preflight; six tests pass; all spending limits retained |
-| F8: transport retries absent | YES | P2 | DEFER: no observed transient live failure justifies retries |
-| F9: Chat Completions lacks cross-turn reasoning continuity | UNVERIFIED in this workload | P2 | DISCLOSE: keep the current documented API until a reproduced blocker exists |
-| F10: portable recorded evidence missing | YES at inspected HEAD | P1 | FIXED in `a5b6605`; clean-checkout acceptance still required |
-| F11: dirty-tree competition export protection missing | YES | P1 | FIX: distinguish development from competition-grade exports |
-| F12: final release remains draft and unproven | PARTIAL | P1 | DISCLOSE: preserve main; require actual release gates and submission assets |
-| F13 | UNVERIFIED: report text missing | Unassigned | DISCLOSE |
-| F14 | UNVERIFIED: report text missing | Unassigned | DISCLOSE |
-| F15 | UNVERIFIED: report text missing | Unassigned | DISCLOSE |
-| F16 | UNVERIFIED: report text missing | Unassigned | DISCLOSE |
-| F17 | UNVERIFIED: report text missing | Unassigned | DISCLOSE |
-| F18 | UNVERIFIED: report text missing | Unassigned | DISCLOSE |
+`ALREADY_FIXED` identifies a correction present at the inspected commit.
+`NOT_REPRODUCED` means the claimed behavior was not established in this workload.
+`DEFERRED` identifies work intentionally excluded from this sprint. A working-tree
+correction is stated explicitly until committed and verified.
 
-Initial recorded checks: the accepted UI block passed 171 Python tests, 13 frontend tests, and the production frontend build. The first expanded 187-test run found one assertion-message mismatch in a new portability negative test; the test now reaches the intended aggregate-provenance check, and all 13 focused portability tests pass. No historical evidence or frozen fixture was changed to resolve it.
+| Finding | Priority | Disposition and evidence |
+| --- | --- | --- |
+| F1: pipeline completion can mask a fresh bypass | P0 | **ALREADY_FIXED** in `ecbef35` and `6cf850e`. `assess_re_attack()` separates execution, outcome, and assurance. `test_fresh_real_sqlite_bypass_cannot_report_overall_pass_after_verified_promotion` executes an actual bypass after promotion and requires overall FAIL/BYPASSED. Partial unsafe event history also wins over an unfinished aggregate. Additional portable-verifier tests reject rehashed and legacy false PASS claims. |
+| F2: Red receives solution hints | P0 | **ALREADY_FIXED** in `b61e68e`. [Neutral live-v1](../evals/protocol/live-v1.json) binds prompts, tool descriptions, schemas, models, seeds, and limits before live calls. `test_primary_prompts_expose_contract_and_objective_without_solution_hints` checks the actual runtime inputs. The trusted contract remains visible; empirical prompt effects remain unmeasured without Meta access. |
+| F3: direct invariant shield baseline is absent | P0 | **ALREADY_FIXED** in `992172b`. Run `direct-shield-08422d91385a4a96a417479a07c98a6f` blocks 5/5 unsafe cases and completes 20/20 required utility workflows with zero false blocks, matching handcrafted fixture v1. Genuine Blue comparison remains PENDING. See [Evaluation](EVALUATION.md). |
+| F4: random explorer baseline is absent | P0 | **ALREADY_FIXED** in `992172b`. Protocol and seeds 0–99 were committed before measurement. Run `random-baseline-d1780f0fef7847f19d95dab60de91f40` finds 84/100 verified counterexamples within ten actions; all 100 attempts, including 16 action-limit exhaustions, are retained. No Meta superiority is established. |
+| F5: held-out cases retain the same topology | P1 | **CONFIRMED**: two regression and two held-out cases vary parameters, not topology. A preregistered local sweep uses the existing generator; results must be reported as same-topology parametric robustness. New worlds and cross-topology claims are **DEFERRED** outside this sprint. Frozen suites remain unchanged. |
+| F6: Blue is told the intended comparison strategy | P0 | **ALREADY_FIXED** in `b61e68e`. Frozen neutral Blue and validator-correction prompts retain the restricted DSL and utility requirements without prescribing the desired inequality. The same static prompt test covers Blue. Actual synthesis quality remains unmeasured. |
+| F7: the example Wonder cap cannot reserve a request | P0 | **ALREADY_FIXED** detection in `e486000`, with authorization/protocol binding in `b61e68e`. The zero-network budget preflight reports a $4.276224 Wonder reservation at 4096 completion tokens against the unchanged $3 example cap. `test_unknown_model_prices_and_protocol_limits_stop_before_ledger_or_transport` verifies refusal before spending. A usable key and explicitly approved feasible budget remain real live blockers. |
+| F8: transient failures have no bounded retry | P2 | **DEFERRED**. Inspection confirms no automatic retry and 429 currently maps to provider blocking. No live transient failure has been observed. Adding paid retries before transport/billing validation is not justified for this sprint; failures remain explicit and fail closed. Rejected Codex inference must never be retried or bypassed. |
+| F9: Chat Completions may weaken multi-turn reasoning | P2 | **NOT_REPRODUCED** in this workload: no permitted Meta run exists to compare. Meta documents Chat Completions and recommends Responses for reasoning continuity. Adapter migration and A/B calls are **DEFERRED** until an observed limitation and approved budget justify them. |
+| F10: evidence cannot be verified away from the original cache | P1 | **ALREADY_FIXED** export/verification code in `a5b6605`. The [portable package](VERIFY_EVIDENCE.md) preserves raw JSON, allowlisted artifacts, SQLite snapshots, source, and SHA-256 manifest. Tests independently recompute transitions, deltas, oracles, policy/promotion bindings, provenance, and partial-run claims. Clean-checkout acceptance is recorded separately; source `.cache` is preserved, not deleted. |
+| F11: a commit SHA can hide uncommitted execution changes | P1 | **CONFIRMED at inspected HEAD; corrected in working tree**. `--competition` rejects dirty source evidence or exporter checkout before copying; default development exports retain dirty provenance. Tests reject dirty competition export and reclassification of a development package. Clean positive export/verification must pass before acceptance. |
+| F12: main, draft PR, and final release remain unfinished | P1 | **DEFERRED final release**, as required by the accepted gate order. The [release checklist](DEMO.md#release-checklist) requires real Meta gates, clean evidence, tests/build, final demo/submission, then merge/tag/protected backup. Preserving `main` and the draft before those gates is deliberate. Neither a local checklist nor an offline fixture establishes G8. No new CI infrastructure is required for this sprint. |
+| F13: numerical judging weights lack provenance | P0 | **CONFIRMED at inspected HEAD; corrected in working tree**. The participant-supplied accepted Official Rules explicitly give 30% Impact, 25% Use of Meta AI Tooling, 20% Technical Depth & Execution, and 25% Demo Quality. Only the corresponding specification/demo sections change. The public organizer page separately supports qualitative Indie criteria, not these numerical weights. |
+| F14: related systems undermine an architecture-first novelty claim | P1 | **NOT_REPRODUCED** as an unsupported “first” or research-novelty claim in current public wording. The related-work concern is valid; README now acknowledges VEPA, ActGov, and AutoSpec and describes the integrated executable evidence contribution without comparative performance claims. No architectural rewrite is warranted. |
+| F15: ownership of the safety requirement is unclear | P1 | **CONFIRMED wording gap; corrected in working tree**. `TaskContract.production_minimum` is trusted host input; `evaluate_safety()` checks committed allocation against it. README and UI identify the trusted safety contract. The UI never derives its threshold from a model explanation. Models search for enforcement counterexamples; they do not discover unknown safety requirements. An unfamiliar-engineer demo review remains unperformed. |
+| F16: guarantees depend on the deterministic model's fidelity | P1 disclosure | **ALREADY_DISCLOSED** as a synthetic environment in the specification; README now makes the limitation explicit. Preview/commit consistency proves this model's semantics, not cloud fidelity. Real-state calibration, digital twins, and deployment controllers are **DEFERRED** outside scope. |
+| F17: the implementation supports one repair, not continual evolution | P1 disclosure | **ALREADY_FIXED** behavior: the registry permits one bounded `v0 → v1` cycle. `test_second_promotion_and_unknown_version_cannot_bypass_gate` rejects a second promotion. README explicitly limits the claim; multi-version evolution is **DEFERRED** outside scope. |
+| F18: participant eligibility is not independently confirmed | External | **UNVERIFIED** administrative dependency. Technical code and repository history cannot prove accepted participant details meet the Official Rules. No conclusion is inferred from language, username, nationality, or timezone, and no personal eligibility information belongs in the public repository. |
 
-Official documentation reviewed: [model IDs and context windows](https://dev.meta.ai/docs/models), [Standard-mode prices](https://dev.meta.ai/docs/pricing-rate-limits), [Chat Completions](https://dev.meta.ai/docs/protocols/chat-completions), [tool calling](https://dev.meta.ai/docs/tool-calling), and [structured output](https://dev.meta.ai/docs/structured-output). Numeric maximum output ceilings were not established by these pages. Account entitlement, credits, and actual transport behavior remain unverified.
+## Recorded evidence and remaining limits
 
-The participant-provided Official Rules specify Impact 30%, Use of Meta AI Tooling 25%, Technical Depth & Execution 20%, and Demo 25%. The [public organizer page](https://events.cerebralvalley.ai/e/meta-ai-developer-hackathon) separately confirms the Indie considerations of creativity, technical ambition, and actual functionality; its public page does not expose the numerical submission rubric. Personal eligibility information is outside this technical audit.
+Both baseline runs above use committed code at `992172b`; their source dirty flag
+remains disclosed. Their policy patch is handcrafted fixture evidence. The direct
+shield result demonstrates that LLM synthesis is not mathematically necessary for
+this bounded world. Random search is effective here. The project claim therefore
+centers on independently verified repair, utility preservation, and causal replay,
+not unique discovery ability. Full measurements and retained attempt references
+are in [Evaluation](EVALUATION.md).
+
+No genuine Meta calls, measured model comparison, production fidelity validation,
+final competition video, or checked submission are established by this audit.
+G3, AI-dependent G4/G7, and G8 remain PENDING. The accepted offline anchor remains
+`offline-core-v0.1`; no competition core release is declared.
+
+Official API references reviewed for the implementation are [model IDs and context
+windows](https://dev.meta.ai/docs/models), [Standard-mode prices](https://dev.meta.ai/docs/pricing-rate-limits),
+[Chat Completions](https://dev.meta.ai/docs/protocols/chat-completions), [tool calling](https://dev.meta.ai/docs/tool-calling),
+and [structured output](https://dev.meta.ai/docs/structured-output). Account entitlement,
+numeric output ceilings, real billing behavior, latency, and transport behavior
+remain unverified. The dated model reference does not authorize spending.
+
+Judging-weight provenance is the participant-provided accepted Official Rules.
+The [public organizer page](https://events.cerebralvalley.ai/e/meta-ai-developer-hackathon)
+separately confirms the Indie considerations of creativity, technical ambition,
+and actual functionality. Personal eligibility is outside this technical audit.

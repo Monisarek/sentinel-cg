@@ -103,7 +103,7 @@ def _validate_calls(calls, fixture):
 
 def _execute_cycle(directory: Path, budget: RuntimeBudget, models: dict, seed: int, *,
                    driver_factory=MetaAgentDriver, synthesizer_factory=MetaPolicySynthesizer,
-                   evidence_kind="genuine_live_provider_run", protocol_binding=None) -> dict:
+                   evidence_kind="genuine_live_provider_run", protocol_binding=None, budget_preflight=None) -> dict:
     """Factories support explicit unit fixtures; the live CLI never exposes them."""
     if evidence_kind not in ("genuine_live_provider_run", "deterministic_test_fixture"):
         raise ValueError("unknown runtime evidence kind")
@@ -114,6 +114,7 @@ def _execute_cycle(directory: Path, budget: RuntimeBudget, models: dict, seed: i
     evidence = _base_evidence(directory, seed, evidence_kind)
     evidence["evaluation_variant"] = "deterministic_test_fixture" if fixture else "neutral_primary" if protocol_binding else "unbound_development"
     evidence["evaluation_protocol"] = deepcopy(protocol_binding)
+    evidence["budget_preflight"] = deepcopy(budget_preflight)
     initial, task = seeded_state(seed)
     registry = PolicyRegistry.create(directory / "policies.sqlite3", initial, task)
     evidence["frozen_suite_hashes"] = frozen_suite_hashes()
@@ -303,7 +304,7 @@ def run_meta(output_root: Path, authorization_file: Path | None = None, *, seed:
     _save(directory, evidence)
     try:
         budget = RuntimeBudget(ROOT / ".cache/meta-spend.sqlite3", directory.name, approval, pricing)
-        return _execute_cycle(directory, budget, models, seed, protocol_binding=binding)
+        return _execute_cycle(directory, budget, models, seed, protocol_binding=binding, budget_preflight=preflight)
     except Exception as failure:
         evidence = json.loads((directory / "evidence.json").read_text(encoding="utf-8"))
         evidence.update(status="FAIL", runtime_status="STOPPED", pipeline_status="STOPPED",

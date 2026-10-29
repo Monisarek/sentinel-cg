@@ -100,6 +100,29 @@ class PortableEvidenceTests(unittest.TestCase):
         self.assertFalse(any("spending" in name or ".env" in name or "authorization" in name for name in names))
         self.assertEqual((self.meta_package / "artifacts/evidence.json").read_bytes(), Path(self.meta["evidence_path"]).read_bytes())
 
+    def test_competition_export_rejects_dirty_source_and_verifier_before_copy(self):
+        source = self.work / "source-fixture"
+        shutil.copytree(Path(self.core["evidence_path"]).parent, source)
+        data = json.loads((source / "evidence.json").read_text(encoding="utf-8"))
+        for dirty_source in (True, False):
+            data["working_tree_dirty"] = dirty_source
+            data.pop("bundle_hash", None)
+            data["bundle_hash"] = digest(data)
+            write_json(source / "evidence.json", data)
+            with patch("apps.control.sentinel.evidence.portable._git", return_value=" M unit-fixture.py"), \
+                 self.assertRaisesRegex(ValueError, "clean source run" if dirty_source else "clean verifier checkout"):
+                export_evidence(source / "evidence.json", self.work / "competition-package", competition=True)
+            self.assertFalse((self.work / "competition-package").exists())
+
+    def test_dirty_development_package_cannot_be_reclassified_as_competition_grade(self):
+        package = self.copy_package()
+        manifest_path = package / "manifest.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest.update(export_grade="competition", verifier_working_tree_dirty=True)
+        write_json(manifest_path, manifest)
+        with self.assertRaisesRegex(ValueError, "clean source and verifier provenance"):
+            verify_evidence(package)
+
     def test_blocked_and_provider_rejected_partial_runs_remain_partial(self):
         with patch.dict(os.environ, {"MODEL_API_KEY": ""}):
             blocked = run_meta(self.work / "blocked-run")
@@ -198,6 +221,9 @@ class PortableEvidenceTests(unittest.TestCase):
         data["gates"]["G3"] = "PASS"
         for role in ("red", "blue", "reattack"):
             data["stages"][role]["model_calls"] = []
+        # Isolate the false aggregate call claim from the separate assurance checks.
+        data.update(status="FAIL", policy_assurance_status="INCONCLUSIVE", re_attack_outcome="INCONCLUSIVE")
+        data["runtime_checks"].update(fresh_re_attack_completed=False, no_verified_counterexample_on_re_attack=False)
         write_json(path, data)
         reseal_package(package)
         manifest_path = package / "manifest.json"
@@ -215,6 +241,37 @@ class PortableEvidenceTests(unittest.TestCase):
         write_json(path, data)
         reseal_package(package)
         with self.assertRaisesRegex(ValueError, "recorded policy_assurance_status mismatch"):
+            verify_evidence(package)
+
+    def test_rehashed_pipeline_status_must_match_the_recorded_stop(self):
+        with patch.dict(os.environ, {"MODEL_API_KEY": ""}):
+            source = run_meta(self.work / "blocked-runtime")
+        package = self.work / "blocked-package"
+        export_evidence(Path(source["evidence_path"]), package)
+        data = json.loads((package / "artifacts/evidence.json").read_text(encoding="utf-8"))
+        data["pipeline_status"] = "COMPLETED"
+        write_json(package / "artifacts/evidence.json", data)
+        reseal_package(package)
+        with self.assertRaisesRegex(ValueError, "recorded pipeline status mismatch"):
+            verify_evidence(package)
+
+    def test_legacy_overall_pass_cannot_hide_an_actual_sqlite_bypass(self):
+        harness = FixtureHarness(narrow=True, reattack_mode="maximal")
+        directory = self.work / "bypass-fixture"
+        budget = RuntimeBudget(self.work / "fixture-ledger.sqlite3", directory.name, approval(), prices())
+        source = _execute_cycle(directory, budget, MODELS, 0, driver_factory=harness.driver,
+                                synthesizer_factory=harness.synthesizer, evidence_kind="deterministic_test_fixture")
+        package = self.work / "bypass-package"
+        export_evidence(Path(source["evidence_path"]), package)
+        self.assertEqual(verify_evidence(package)["original_status"], "FAIL")
+        data = json.loads((package / "artifacts/evidence.json").read_text(encoding="utf-8"))
+        data.pop("policy_assurance_status")
+        data.pop("pipeline_status")
+        data["runtime_checks"].pop("no_verified_counterexample_on_re_attack")
+        data["status"] = "PASS"
+        write_json(package / "artifacts/evidence.json", data)
+        reseal_package(package)
+        with self.assertRaisesRegex(ValueError, "unsuccessful policy assurance"):
             verify_evidence(package)
 
     def test_rehashed_manifest_cannot_omit_a_recorded_agent_snapshot(self):

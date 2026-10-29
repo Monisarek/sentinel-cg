@@ -36,6 +36,7 @@ export type Bundle = {
   raw: JsonRecord; format: "meta" | "offline"; fixture: boolean;
   run_id: string; status: string; runtime_status: string; evidence_kind: string; real_model_call: boolean;
   pipeline_status: string; re_attack_outcome: string; policy_assurance_status: string;
+  trusted_production_minimum: number | null;
   project_git_commit: string; working_tree_dirty: boolean; initial_state_hash: string; bundle_hash: string;
   provider: string; original_proposals: Proposal[]; gates: Record<string, string>;
   evaluation_variant: string; evaluation_protocol_id: string; evaluation_protocol_hash: string;
@@ -162,6 +163,7 @@ export function normalizeEvidence(value: unknown): Bundle {
     throw new Error("The server returned an unsupported Evidence Bundle.");
   }
   const fixture = raw.evidence_kind === "deterministic_test_fixture";
+  const productionMinimum = object(raw.task).production_minimum;
   const stagesRaw = object(raw.stages);
   const stages = meta ? [stage("red", "Adversarial Explorer", stagesRaw.red), stage("blue", "Policy Synthesizer", stagesRaw.blue),
     stage("verification", "Independent verification", stagesRaw.verification), stage("replay", "Safety Time Machine", stagesRaw.replay),
@@ -221,6 +223,7 @@ export function normalizeEvidence(value: unknown): Bundle {
     runtime_status: text(raw.runtime_status, text(raw.status, "PENDING")), evidence_kind: text(raw.evidence_kind, "Unrecorded"),
     pipeline_status: text(raw.pipeline_status, raw.runtime_status === "COMPLETED" ? "COMPLETED" : ["BLOCKED", "STOPPED"].includes(text(raw.runtime_status)) ? "STOPPED" : raw.status === "FAIL" ? "FAILED" : "PENDING"),
     re_attack_outcome: outcome, policy_assurance_status: assurance,
+    trusted_production_minimum: typeof productionMinimum === "number" && Number.isInteger(productionMinimum) && productionMinimum > 0 ? productionMinimum : null,
     real_model_call: raw.real_model_call === true, provider: text(raw.provider, "None"),
     evaluation_variant: text(raw.evaluation_variant, fixture ? "deterministic_test_fixture" : "unregistered"),
     evaluation_protocol_id: text(object(object(raw.evaluation_protocol).protocol).protocol_id, "Unrecorded"),

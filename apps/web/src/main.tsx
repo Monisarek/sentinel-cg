@@ -41,18 +41,18 @@ function Allocation({ name, service, capacity }: { name: string; service: Servic
   </div>;
 }
 
-function World({ version, fork, step, hash }: { version: "v0" | "v1"; fork: Fork; step: number; hash: string }) {
+function World({ version, fork, step, hash, trustedMinimum }: { version: "v0" | "v1"; fork: Fork; step: number; hash: string; trustedMinimum: number | null }) {
   const state = fork.committed_states[step];
   const event = step > 0 ? fork.events[step - 1] : null;
-  const safe = event ? event.safety.safe : state.production.allocated_connections >= state.production.minimum_healthy_connections;
+  const safe = event ? event.safety.safe : trustedMinimum === null ? null : state.production.allocated_connections >= trustedMinimum;
   const used = state.production.allocated_connections + state.staging.allocated_connections;
   return <section className={`world ${version}`} aria-label={`Policy ${version} committed state`}>
-    <div className="world-heading"><div><span className="eyebrow">{version === "v0" ? "Baseline policy" : "Verified policy"}</span><h2>Policy {version}</h2></div><Status pass={safe}>{safe ? "S1 PRESERVED" : "S1 VIOLATED"}</Status></div>
+    <div className="world-heading"><div><span className="eyebrow">{version === "v0" ? "Baseline policy" : "Verified policy"}</span><h2>Policy {version}</h2></div>{safe === null ? <RecordedStatus value="UNVERIFIED" /> : <Status pass={safe}>{safe ? "S1 PRESERVED" : "S1 VIOLATED"}</Status>}</div>
     <div className="gateway-decision"><span>Gateway</span><strong className={event?.decision === "DENY" ? "deny" : ""}>{event ? event.decision : "INITIAL STATE"}</strong><small>{event ? event.outcome : "No action applied"}</small></div>
     <Allocation name="Production" service={state.production} capacity={state.total_capacity} />
     <Allocation name="Staging" service={state.staging} capacity={state.total_capacity} />
     <div className="pool-summary"><span>Shared capacity</span><strong>{used} / {state.total_capacity}<small> connections allocated</small></strong></div>
-    <div className="oracle-line">{event ? (event.safety.violations.join(" · ") || "Committed production allocation meets its protected minimum.") : "Both forks start from the same saved state."}</div>
+    <div className="oracle-line">Trusted Safety Contract: {trustedMinimum === null ? "UNVERIFIED · production minimum not recorded." : `production minimum ${trustedMinimum} connections from the host task contract.`}<br />{event ? (event.safety.violations.join(" · ") || "Committed production allocation meets its protected minimum.") : trustedMinimum === null ? "Initial safety requires a recorded trusted minimum." : "Both forks start from the same saved state."}</div>
     <div className="world-hashes"><span>state <code>{short(event?.after_hash || hash)}</code></span><span>version {state.version}</span></div>
   </section>;
 }
@@ -72,7 +72,7 @@ function TimeMachine({ bundle, selected, select, recorded }: { bundle: Bundle; s
         <div className="recorded-count">{recorded} recorded events received</div>
         <div className="trace-navigation"><button disabled={step === 0} onClick={() => select(step - 1)}>Previous</button><button disabled={step === bundle.original_proposals.length} onClick={() => select(step + 1)}>Next</button></div>
       </aside>
-      <div className="worlds"><World version="v0" fork={machine.forks.v0} step={step} hash={bundle.initial_state_hash} /><World version="v1" fork={machine.forks.v1} step={step} hash={bundle.initial_state_hash} /></div>
+      <div className="worlds"><World version="v0" fork={machine.forks.v0} step={step} hash={bundle.initial_state_hash} trustedMinimum={bundle.trusted_production_minimum} /><World version="v1" fork={machine.forks.v1} step={step} hash={bundle.initial_state_hash} trustedMinimum={bundle.trusted_production_minimum} /></div>
     </div>
     <div className="same-input"><span>Same initial state <code>{short(bundle.initial_state_hash)}</code></span><span>Same trace <code>{short(machine.source_trace_hash)}</code></span><span>Viewing {step === 0 ? "initial state" : `state after action ${step}`}</span></div>
     <section className="panel deltas"><div className="section-title"><h2>Actual committed deltas</h2><span className="small-label">{step ? `Action ${step}` : "Initial state"}</span></div><div className="delta-columns">{(["v0", "v1"] as const).map(version => { const event = step ? machine.forks[version].events[step - 1] : null; return <div key={version}><h3>Policy {version}</h3>{event?.actual_delta.length ? <ul>{event.actual_delta.map((delta, index) => <li key={index}><code>{delta.resource} · {delta.field}</code><span>{delta.before} → <strong>{delta.after}</strong></span></li>)}</ul> : <p className="muted">{event?.decision === "DENY" ? "DENY: no committed state changes." : "No committed state changes."}</p>}</div>; })}</div></section>
@@ -134,7 +134,7 @@ export function Workspace({ bundle, selected, select, recorded }: { bundle: Bund
     <PolicyVerification bundle={bundle} />
     <RuntimeStages bundle={bundle} />
     <div className="pending"><strong>Meta acceptance evidence</strong><span>G3 discovery <RecordedStatus value={bundle.gates.G3} /> · G4 synthesis <RecordedStatus value={bundle.gates.G4_AI} /> · G7 adaptive re-attack <RecordedStatus value={bundle.gates.G7_AI} /></span><p>{bundle.fixture ? "Deterministic test fixtures do not establish autonomous discovery, model-generated repair, or live Meta performance." : "Gate status requires genuine Meta call provenance and the corresponding recorded runtime checks. PENDING does not establish a completed gate."}</p></div>
-    <details className="provenance panel"><summary>Evidence provenance and integrity</summary><dl><div><dt>Run ID</dt><dd><code>{bundle.run_id}</code></dd></div><div><dt>Git commit</dt><dd><code>{bundle.project_git_commit}</code>{bundle.working_tree_dirty ? " · working tree had changes" : " · clean working tree"}</dd></div><div><dt>Initial state SHA-256</dt><dd><code>{bundle.initial_state_hash}</code></dd></div><div><dt>Bundle SHA-256</dt><dd><code>{bundle.bundle_hash}</code></dd></div><div><dt>Evidence kind</dt><dd><code>{bundle.evidence_kind}</code></dd></div><div><dt>Provider</dt><dd>{bundle.provider}</dd></div><div><dt>Real model call</dt><dd>{String(bundle.real_model_call)}</dd></div><div><dt>Evaluation variant</dt><dd><code>{bundle.evaluation_variant}</code></dd></div><div><dt>Evaluation protocol</dt><dd><code>{bundle.evaluation_protocol_id}</code><br /><code>{bundle.evaluation_protocol_hash}</code></dd></div><div><dt>Actual model IDs</dt><dd>{[...new Set(bundle.model_calls.map(call => call.model_id))].join(" · ") || "No recorded model calls"}</dd></div></dl></details>
+    <details className="provenance panel"><summary>Evidence provenance and integrity</summary><dl><div><dt>Run ID</dt><dd><code>{bundle.run_id}</code></dd></div><div><dt>Trusted Safety Contract</dt><dd>{bundle.trusted_production_minimum === null ? "UNVERIFIED · production minimum not recorded" : `Production minimum ${bundle.trusted_production_minimum} connections · host task contract`}</dd></div><div><dt>Git commit</dt><dd><code>{bundle.project_git_commit}</code>{bundle.working_tree_dirty ? " · working tree had changes" : " · clean working tree"}</dd></div><div><dt>Initial state SHA-256</dt><dd><code>{bundle.initial_state_hash}</code></dd></div><div><dt>Bundle SHA-256</dt><dd><code>{bundle.bundle_hash}</code></dd></div><div><dt>Evidence kind</dt><dd><code>{bundle.evidence_kind}</code></dd></div><div><dt>Provider</dt><dd>{bundle.provider}</dd></div><div><dt>Real model call</dt><dd>{String(bundle.real_model_call)}</dd></div><div><dt>Evaluation variant</dt><dd><code>{bundle.evaluation_variant}</code></dd></div><div><dt>Evaluation protocol</dt><dd><code>{bundle.evaluation_protocol_id}</code><br /><code>{bundle.evaluation_protocol_hash}</code></dd></div><div><dt>Actual model IDs</dt><dd>{[...new Set(bundle.model_calls.map(call => call.model_id))].join(" · ") || "No recorded model calls"}</dd></div></dl></details>
   </>;
 }
 
