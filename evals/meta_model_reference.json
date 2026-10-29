@@ -1,0 +1,37 @@
+{
+  "reviewed_at": "2026-10-28",
+  "sources": {
+    "models": "https://dev.meta.ai/docs/models",
+    "pricing": "https://dev.meta.ai/docs/pricing-rate-limits",
+    "chat_completions": "https://dev.meta.ai/docs/protocols/chat-completions",
+    "tool_calling": "https://dev.meta.ai/docs/tool-calling",
+    "structured_output": "https://dev.meta.ai/docs/structured-output"
+  },
+  "models": {
+    "muse-spark-1.3": {
+      "input_usd_per_million": "1.25",
+      "output_usd_per_million": "4.25",
+      "input_token_limit": 1048576,
+      "maximum_output_tokens": null
+    },
+    "muse-wonder-1.0": {
+      "input_usd_per_million": "4",
+      "output_usd_per_million": "20",
+      "input_token_limit": 1048576,
+      "maximum_output_tokens": null
+    }
+  },
+  "contract": {
+    "endpoint": "https://api.meta.ai/v1/chat/completions",
+    "completion_limit_parameter": "max_completion_tokens",
+    "tool_choice": "auto",
+    "parallel_tool_calls": false,
+    "native_execution_tools": false
+  },
+  "limitations": [
+    "Public documentation review is not an account entitlement check.",
+    "The documented context window is used as a conservative full-input reservation bound.",
+    "A numeric maximum output limit was not established in the reviewed official pages.",
+    "Prices and API behavior must be rechecked before approving paid execution; no approval is granted by this reference."
+  ]
+}

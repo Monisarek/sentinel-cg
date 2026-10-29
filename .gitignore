@@ -1,0 +1,21 @@
+# Local credentials and runtime state
+.env
+.env.*
+!.env.example
+.venv/
+.cache/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+node_modules/
+dist/
+*.sqlite
+*.sqlite3
+*.db
+
+# Original user attachment stays local; its complete text is tracked in docs/.
+/Engineering Specification.docx
