@@ -56,6 +56,30 @@ The product demonstration must therefore establish the value of discovering an
 enforcement gap, proposing a restricted repair, preserving utility, and recording
 independently verified evidence.
 
+## Existing-topology parameter sweep
+
+Protocol `evals/parametric_sweep.json` and its implementation were committed in
+`397e3d9` before measurement. SHA-256:
+`e75b09be5839e570aacf0d9b47fcd471684065c2f0426e51070a8cfbbfa7bbb5`.
+Run `parametric-sweep-1a68ec8119204235b9b613778f917fa4` used that source with
+a disclosed dirty working tree. All seeds 0–99 are retained, with one JSON record
+and three actual SQLite executions per seed.
+
+| Measurement | Result |
+| --- | --- |
+| Valid scenarios / recorded scenarios | 100/100 |
+| v0 independently verified S1 violations | 100/100 |
+| Unsafe sequences blocked by fixture v1 | 100/100 |
+| Legitimate repair runs completed | 100/100 |
+| Required utility workflows completed | 500/500 |
+| False blocks / mutations on DENY | 0 / 0 |
+| Execution errors / failed scenarios | 0 / 0 |
+
+The existing generator varies capacity, protected minima, and initial allocation.
+The topology, two mutation tools, handcrafted counterexample construction, and
+fixture candidate are unchanged. This extends parameter coverage without claiming
+another attack class, independent production validation, or AI discovery.
+
 ## Interpretation and limits
 
 The trusted task contract declares safety; an agent searches for violations of

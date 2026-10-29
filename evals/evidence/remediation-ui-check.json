@@ -1,0 +1,71 @@
+{
+  "status": "PASS",
+  "method": "Existing normalizer and React server rendering over four actual packaged SQLite evidence runs",
+  "interactive_browser_checked": false,
+  "results": {
+    "core": {
+      "run_id": "deterministic-core-a5e322cdc2b0430abe0064b25ca6697f",
+      "status": "PASS",
+      "source_json_unchanged": true,
+      "real_model_call": false,
+      "rendered_status": "PASS",
+      "gates": {
+        "G3": "PENDING",
+        "G4_AI": "PENDING",
+        "G5_deterministic": "PASS",
+        "G6": "PASS",
+        "G7_AI": "PENDING",
+        "G8": "PENDING"
+      },
+      "has_recorded_replay": true
+    },
+    "meta-full-fixture": {
+      "run_id": "meta-runtime-fixture-adc7c02eb0724b809f091e4755465650",
+      "status": "PASS",
+      "source_json_unchanged": true,
+      "real_model_call": false,
+      "rendered_status": "PASS",
+      "gates": {
+        "G3": "PENDING",
+        "G4_AI": "PENDING",
+        "G5": "PASS",
+        "G6": "PASS",
+        "G7_AI": "PENDING",
+        "G8": "PENDING"
+      },
+      "has_recorded_replay": true
+    },
+    "meta-blocked": {
+      "run_id": "meta-cycle-c83f641a44c9420896d7ed98eed4bbb5",
+      "status": "PASS",
+      "source_json_unchanged": true,
+      "real_model_call": false,
+      "rendered_status": "FAIL",
+      "gates": {
+        "G3": "PENDING",
+        "G4_AI": "PENDING",
+        "G5": "PENDING",
+        "G6": "PENDING",
+        "G7_AI": "PENDING",
+        "G8": "PENDING"
+      },
+      "has_recorded_replay": false
+    },
+    "meta-bypass-fixture": {
+      "run_id": "meta-runtime-fixture-716232fc29074a0780139eb4e8f59014",
+      "status": "PASS",
+      "source_json_unchanged": true,
+      "real_model_call": false,
+      "rendered_status": "FAIL",
+      "gates": {
+        "G3": "PENDING",
+        "G4_AI": "PENDING",
+        "G5": "PASS",
+        "G6": "PASS",
+        "G7_AI": "PENDING",
+        "G8": "PENDING"
+      },
+      "has_recorded_replay": true
+    }
+  }
+}
