@@ -213,6 +213,19 @@ class PortableEvidenceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 verify_evidence(package)
 
+    def test_rehashed_bundle_cannot_claim_g8_acceptance(self):
+        for source in (self.core_package, self.meta_package):
+            with self.subTest(source=source.name):
+                package = self.work / (source.name + "-g8")
+                shutil.copytree(source, package)
+                path = package / "artifacts/evidence.json"
+                data = json.loads(path.read_text(encoding="utf-8"))
+                data["gates"]["G8"] = "PASS"
+                write_json(path, data)
+                reseal_package(package)
+                with self.assertRaisesRegex(ValueError, "cannot establish submission and judging acceptance"):
+                    verify_evidence(package)
+
     def test_rehashed_genuine_claim_without_calls_cannot_establish_an_ai_gate(self):
         package = self.copy_package(self.meta_package)
         path = package / "artifacts/evidence.json"

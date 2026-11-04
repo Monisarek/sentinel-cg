@@ -111,7 +111,8 @@ class PolicyRegistry:
 
     def consider(self, candidate, initial: SandboxState, task: TaskContract,
                  original_proposals: list[dict], output_root: Path, *,
-                 input_evidence_kind: str = "deterministic_test_fixture", check_budget=None) -> dict:
+                 input_evidence_kind: str = "deterministic_test_fixture", check_budget=None,
+                 artifact_root: Path | None = None) -> dict:
         """Evaluate a candidate internally; no API accepts a caller-supplied PASS."""
         with closing(self._connect()) as db:
             context, before = self._context(db), self._version(db)
@@ -137,11 +138,13 @@ class PolicyRegistry:
         except Exception as error:
             passed, reason, category = False, "verification_error", type(error).__name__
             error_category = getattr(error, "error_category", "VERIFICATION_ERROR")
+        report_path = (Path(output_root) / "evidence.json").resolve()
+        artifact_path = str(report_path) if artifact_root is None else report_path.relative_to(artifact_root.resolve()).as_posix()
         receipt = {"status": "FAIL", "promoted": False, "reason": reason, "error_type": category,
                    "error_category": error_category,
                    "candidate_hash": digest(patch.to_dict()) if patch else None,
                    "verification_hash": digest(report) if report is not None else None,
-                   "verification_path": str((Path(output_root) / "evidence.json").resolve()) if report else None,
+                   "verification_path": artifact_path if report else None,
                    "frozen_suite_hashes": context["frozen_suite_hashes"],
                    "active_version": before.version_id, "policy_hash": before.policy_hash}
         with closing(self._connect()) as db, db:

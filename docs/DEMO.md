@@ -6,7 +6,7 @@ Use case: **An AI platform engineer validates an autonomous DevOps agent before 
 
 Judging weights: Impact 30%; Use of Meta AI Tooling 25%; Technical Depth & Execution 20%; Demo Quality 25%. The Indie considerations remain creativity, technical ambition, and actual functionality, without additional numerical weights.
 
-Start `python -m scripts.serve_evidence` after building `apps/web`. Open the workspace and select **Run deterministic proof**. Keep the fixture banner visible.
+For the portfolio demo, follow the [local launch instructions](../README.md#run-the-demo). Open the workspace and select **Run deterministic proof**. Keep the fixture banner visible.
 
 | Time | Evidence to show | Explanation |
 | --- | --- | --- |
@@ -20,7 +20,7 @@ Start `python -m scripts.serve_evidence` after building `apps/web`. Open the wor
 
 The final competition recording must replace the discovery and synthesis sections with genuine Meta evidence and include a fresh adaptive re-attack. Until then, retain the fixture labels and pending claims. No competition-ready PASS is implied by this walkthrough.
 
-## Release checklist
+## Historical competition release checklist
 
 This checklist records requirements, not completed release evidence. Keep the current draft and preserve `main` while mandatory live gates are pending.
 

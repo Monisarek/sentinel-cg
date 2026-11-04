@@ -22,6 +22,7 @@ def replay(
     v1: CandidatePolicyPatch, output_root: Path, *, policy_hash_v1: str | None = None,
     policy_hash_v0: str | None = None,
     source_live_run_id: str | None = None, input_evidence_kind: str = "deterministic_test_fixture",
+    artifact_root: Path | None = None,
 ) -> dict:
     """Counterfactual execution only; no model discovery or policy activation."""
     if type(proposals) is not list or any(type(proposal) is not dict for proposal in proposals):
@@ -48,7 +49,8 @@ def replay(
             "evidence_kind": replay_kind,
             "input_evidence_kind": input_evidence_kind,
             "execution_mode": "fixed_trace_counterfactual_replay",
-            "sandbox_path": str(path), "initial_state_hash": initial_hash,
+            "sandbox_path": path.relative_to(artifact_root.resolve()).as_posix() if artifact_root is not None else str(path),
+            "initial_state_hash": initial_hash,
             "recorded_trace_hash": sha256(_canonical(run["proposals"]).encode("utf-8")).hexdigest(),
             "persisted_final_state": observed_state(actual),
             "persisted_final_state_hash": state_hash(actual),

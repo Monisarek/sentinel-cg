@@ -1,67 +1,133 @@
 # SENTINEL-CG 2.0
 
-Counterexample-guided safety for autonomous AI agents, built for the Meta Global AI Developer Hackathon 2026.
+**Evidence-driven safety testing for autonomous agents.**
 
-The target demonstration is a staging repair that indirectly starves production through shared capacity. Meta Red will explore permitted actions; Meta Blue will propose a policy repair. Independent deterministic code must verify both production safety and legitimate task completion, then replay the same actions under both policies.
+Both actions targeted staging. Production still fell below its safety floor.
+In this local SQLite experiment, two permitted staging actions compete for a
+shared connection pool and reduce production capacity from 8 to 6. SENTINEL-CG
+verifies a narrow policy repair, checks that legitimate work still succeeds, and
+shows exactly where replay under the two policies diverges.
 
-Use case: **An AI platform engineer validates an autonomous DevOps agent before granting it operational permissions.** The trusted host supplies the safety contract, including the required production minimum. Models search for an enforcement counterexample to that declared invariant and propose a repair; they do not invent the safety requirement or decide whether it holds.
+The Evidence Workspace runs without an API key or paid service. The action trace
+and policy candidate are explicitly labeled handcrafted fixtures. The Gateway
+decisions, state changes, oracle verdicts, and replay are executed locally.
 
-The complete product source of truth is [docs/ENGINEERING_SPEC.md](docs/ENGINEERING_SPEC.md). Engineering rules are in [AGENTS.md](AGENTS.md).
+[Portfolio case study](docs/PORTFOLIO.md) ·
+[Architecture and trust boundaries](docs/PORTFOLIO.md#architecture-and-trust-boundaries) ·
+[Verify the evidence](docs/VERIFY_EVIDENCE.md)
 
-## Current status
+## Run the demo
 
-G1/G2 are implemented: real SQLite state, shared-capacity allocation, independent Safety/Utility Oracles, and a versioned Execution Gateway with deterministic preview, atomic commit and verifiable event traces. Evidence is a deterministic development fixture; there are no live Meta results. The existing MIT license and Git history are preserved. The old workflow bundle is disabled.
+On Windows, install Git, Python 3.10+ and Node.js 22.12+ with npm. Run from a
+PowerShell terminal:
 
-The deterministic G5 verification and controlled promotion path, G6 Safety Time Machine, and a minimal Evidence UI are implemented. The offline cycle rejects overblocking, verifies a narrow candidate against unchanged frozen regression and held-out suites, activates immutable v1, and executes the same recorded actions in two independent SQLite databases. A separate safe staging repair completes after promotion.
+```powershell
+git clone --branch build https://github.com/Monisarek/sentinel-cg.git
+cd sentinel-cg
+powershell -NoProfile -ExecutionPolicy Bypass -File .\start-demo.ps1
+```
 
-Offline inputs and results are labeled `deterministic_test_fixture`: the counterexample and patch are handcrafted, and no model is called. G3 and the AI-dependent parts of G4/G7 remain PENDING. The [historical failed Codex run](evals/evidence/codex-blocked.json) found no verified counterexample; its next inference request was rejected for cybersecurity access. Experimental Codex inference is disabled. Ordinary coding-agent development continues.
+Open <http://127.0.0.1:8000>. The launcher prepares `.venv`, installs free
+dependencies from the Python and npm registries when needed, builds the frontend,
+and serves it on loopback. Stop it with Ctrl+C. If the default port is busy,
+append `-Port 8001` and open <http://127.0.0.1:8001>. Registry access is needed
+for an uncached first install. The experiment itself runs offline.
 
-The accepted offline version is tagged [`offline-core-v0.1`](https://github.com/Monisarek/sentinel-cg/tree/offline-core-v0.1) at `53b1aa9`, with a remote backup branch `codex/backup/offline-core-v0.1`. It is not the competition `core-v1.0.0` release. UI appearance is frozen while Meta-dependent gates remain pending.
+On Linux or macOS, use the same prerequisites and run from the repository root:
 
-The seeded random baseline finds 84/100 verified counterexamples within ten actions. A Direct Invariant Shield blocks the same 5/5 unsafe cases as the handcrafted fixture patch and preserves 20/20 required utility workflows. These measurements establish neither Meta superiority nor a need for LLM synthesis in this small world. See [Evaluation](docs/EVALUATION.md) for the fixed protocol, retained failures, and measurement limits, and the [F1–F18 audit](docs/AUDIT.md) for checked findings and deferred work.
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+(cd apps/web && npm ci --ignore-scripts && npm run build)
+python -m scripts.serve_evidence --output-dir .cache/portfolio
+```
 
-## Local setup
+1. Select **Run deterministic proof**, then **Initial state** to inspect the shared
+   snapshot. Advance through the staging configuration change and restart.
+2. At the restart, compare v0's ALLOW and production allocation of 6 with v1's
+   DENY and preserved allocation of 8. Inspect the committed deltas and the
+   production minimum supplied by the trusted task contract.
+3. Review the deny-only patch, the rejected overblocking control, and the separate
+   safe staging repair. The repair restores staging to 4 while production stays at 8.
+4. Select **Download JSON** for the run record. Repeat the proof to create an
+   independent run. For a portable package with SQLite snapshots and source, use
+   the commands below.
 
-Use Python 3.10+ and Git. G1/G2 and the deterministic proof use the standard library. Install API/test dependencies with `python -m pip install -r requirements-dev.txt`, then run `python -m unittest discover -s tests -v` (including the English-only guard). G1/G2 remain reproducible with `python -m scripts.prove_g1` and `python -m scripts.prove_g2`.
+## Engineering decisions
 
-Run `python -m scripts.prove_core` for candidate → independent verification → promotion/rejection → counterfactual replay. Its printed path identifies the complete bundle, immutable policy registry, verification artifacts, and real SQLite databases under `.cache/core/<run_id>/`. The bundle uses JSON/SHA-256; a PASS never establishes Meta-dependent gates. Frozen regression and held-out files must retain their recorded hashes.
+- **Preview and commit use the same deterministic transition.** The Gateway
+  validates typed actions against trusted task scope and policy. Preview and
+  atomic commit are tied to the current SQLite version. A DENY leaves the
+  sandbox unchanged.
+- **Safety and utility are checked independently.** The oracles inspect
+  committed state and the trusted task contract. A candidate that blocks the
+  counterexample and also blocks required workflows fails verification.
+- **Promotion is controlled.** A restricted, deny-only policy patch must pass the
+  original counterexample, frozen regression and held-out checks before the
+  registry appends immutable v1. The proposal source cannot promote a patch.
+- **Replay isolates the policy variable.** The Safety Time Machine starts two
+  independent SQLite forks from the same state and executes the same proposals
+  under v0 and v1, recording the first divergence and persisted final states.
 
-For the Evidence UI, use the Node version supported by the pinned Vite dependency (this checkout was tested with Node 22.16). In `apps/web`, run `npm ci --ignore-scripts` and `npm run build`. From the repository root run `python -m scripts.serve_evidence`, then open `http://127.0.0.1:8000`. The UI can start a fresh offline proof and inspect saved states. SSE frames are labeled recorded execution. JSON downloads contain the actual bundle; the API checks bundle, verification, policy, and SQLite state integrity before serving it. See [docs/DEMO.md](docs/DEMO.md) for the truthful three-minute fixture walkthrough.
+## Verify the evidence
 
-The complete runtime command is `python -m scripts.eval_meta --authorization .cache/meta-budget.json --seed 0`. It runs Meta Red → independently verified counterexample → Meta Blue → candidate verification/promotion → fixed-trace replay → a fresh Red instance on active v1 with a different seed → a checkpointed JSON/SHA-256 bundle. Frozen cases never enter synthesis context. Failed discovery stops before Blue; rejected candidates stop before re-attack. No automatic transport retries or provider substitution occurs.
+Use the Run ID from **Evidence provenance and integrity**. The demo commands
+above write runs under `.cache/portfolio/`. Substitute the actual Run ID for
+`RUN_ID` and use an unused output directory. Run both commands at the repository
+root, using Python 3.10+:
 
-The primary live evaluation uses [neutral protocol live-v1](evals/protocol/live-v1.json): frozen prompt/template/tool/schema hashes, discovery seed 0, fresh re-attack seed 1, and fixed call/action/time ceilings. The runtime binds the exact separately authorized configuration bytes before creating a spending ledger. Historical directed runs and unbound development runs do not establish neutral primary results. Pipeline completion, bounded re-attack outcome, and policy assurance are separate: an independently verified bypass produces `BYPASSED` and overall `FAIL`; an empty or failed evaluation is `INCONCLUSIVE`.
+```text
+python -B -m scripts.export_evidence .cache/portfolio/RUN_ID/evidence.json .cache/portable-demo
+python -S -B -m scripts.verify_evidence .cache/portable-demo
+```
 
-Before paid execution, obtain `MODEL_API_KEY`, verify current official model rates, context limits, billing semantics and entitlements, and obtain explicit approval for the budget. [evals/meta_budget.example.json](evals/meta_budget.example.json) is deliberately unauthorized and has no usable pricing. A local operator authorization file must supply all validated fields; configured caps do not authorize this coding agent to spend. Without a key or approval, the runtime writes a blocked PENDING bundle and sends no request.
+On Windows the launcher interpreter is `.\.venv\Scripts\python.exe`. The
+independent verifier uses the standard library and Git and opens the SQLite
+snapshots read-only. The original run status and fixture provenance stay visible
+in its verdict. To verify elsewhere, check out the pinned verifier commit from
+the bundled Git source. [Verification instructions](docs/VERIFY_EVIDENCE.md)
 
-Run `python -B -m scripts.check_meta_budget --config <operator-config.json>` before requesting paid execution. This local command makes zero HTTP requests, changes no authorization, and reports exact full-context reservations and blocking caps. The [dated official-model reference](evals/meta_model_reference.json) implies a $4.276224 Wonder reservation at 4096 completion tokens, exceeding the example $3 Blue cap. Caps remain unchanged. Numeric output ceilings, account entitlement, and actual API acceptance remain unverified; configuration feasibility is not a live service result.
+The recorded evidence collection includes original JSON, portable packages and
+retained baseline attempts. Read the source commit and working-tree status before
+comparing measurements. [Evidence archive](evals/evidence/remediation-offline-evidence.zip) ·
+[SHA-256](evals/evidence/remediation-offline-evidence.zip.sha256) ·
+[Recorded summary](evals/evidence/remediation-summary.json)
 
-The shared ledger is `.cache/meta-spend.sqlite3`; do not delete or replace it to reset limits. Exact Decimal caps apply per stage, cycle, UTC day and total spending, alongside stage/cycle call counts, output-token caps and absolute deadlines. Each request first reserves the full verified model input-context limit plus its maximum completion cost. Valid reported usage settles the conservative estimate. Failed or uncertain requests retain reservations; unexpected models or billing bounds block further spending. Prices and provider-reported token usage are not an invoice. Full-context reservations can reject small budgets even for short prompts; the runtime never increases approved caps automatically. HTTPX enforces a whole-request deadline, and expired responses cannot commit an action or promote policy.
+## Checks and measurements
 
-`python -m scripts.prove_meta_runtime` exercises the same orchestration with explicit test-only drivers, synthetic rates, an isolated fixture ledger and network disabled. Its bundle is `deterministic_test_fixture`, `real_model_call=false`; AI-dependent gates stay PENDING. This command tests integration and must not be presented as live Meta discovery, synthesis, billing, or re-attack. No UI design changes accompany this runtime work.
+Install test dependencies with `python -m pip install -r requirements-dev.txt`
+inside the environment you created above.
 
-Use `python -B -m scripts.export_evidence <recorded-evidence.json> <new-package>` to export a recorded run with its unchanged source JSON, trace and policy artifacts, reports, SQLite snapshots, source bundle, and SHA-256 manifest. `python -B -m scripts.verify_evidence <package>` verifies the recorded proof without inference or dependencies. Follow [the judge instructions](docs/VERIFY_EVIDENCE.md) to clone the bundled source and select the pinned verifier commit. A development export discloses dirty source provenance; `--competition` requires clean source evidence and exporter checkout and never upgrades fixture evidence to a Meta result.
+```text
+python -m unittest discover -s tests -v
+npm --prefix apps/web test
+npm --prefix apps/web run build
+python -m scripts.eval_random
+python -m scripts.eval_shield
+python -m scripts.eval_parametric
+```
 
-The [downloadable offline evidence collection](evals/evidence/remediation-offline-evidence.zip) includes four clean-source runtime packages and every recorded baseline attempt. Its [summary and checksums](evals/evidence/remediation-summary.json) record the separate clean-checkout, no-key, no-network verification. Full, blocked, and bypass runtime formats retain their original statuses and pending Meta gates.
+The historical evaluation found 84/100 counterexamples with the seeded Random
+Explorer. The Direct Invariant Shield and fixture v1 each blocked 5/5 unsafe
+cases and preserved 20/20 required workflows. The parameter sweep blocked 100/100
+unsafe cases and preserved 500/500 required workflows across the same topology.
+Run identifiers, source provenance, denominators, and limitations are in the
+[evaluation report](docs/EVALUATION.md). [Remediation audit](docs/AUDIT.md)
 
-`python -m scripts.eval_codex` only records `PROVIDER_BLOCKED` with zero model calls and actions; there is no runtime re-enable flag or alternative transport. Provider blocking, budget exhaustion, transport failure, schema failure, and sandbox execution failure have separate machine-readable categories. The historical Codex evidence records an explicitly configured model ID without service confirmation and is not Meta evidence. Genuine Meta tool calls, structured output, usage/billing semantics and latency remain unverified until permitted account access and budget approval exist.
+## Scope and provenance
 
-Official API references: [quickstart](https://dev.meta.ai/docs/quickstart), [models](https://dev.meta.ai/docs/models). The documented base URL is `https://api.meta.ai/v1`; configured models are `muse-spark-1.3` and `muse-wonder-1.0`.
+SENTINEL-CG is a bounded engineering prototype for a synthetic shared-capacity
+system. It exercises one v0-to-v1 policy repair cycle and evaluates declared
+invariants under deterministic transitions. Deployment safety on real
+infrastructure, adaptive discovery, and generalization to other topologies
+remain untested.
 
-## Structure
+The project began at the Meta Global AI Developer Hackathon 2026. The optional
+Meta Model API adapter and frozen live evaluation protocol remain in the
+repository. Genuine inference was untested, and competition gates G3, AI-dependent
+G4/G7, and G8 remain PENDING. The historical `offline-core-v0.1` tag identifies
+the earlier offline core. [Engineering specification](docs/ENGINEERING_SPEC.md) ·
+[Frozen live protocol](evals/protocol/live-v1.json)
 
-- `apps/sandbox/`: deterministic world, allocator, transitions, preview, and fixtures.
-- `apps/control/sentinel/`: Gateway, policies, independent oracles, evaluation, replay, evidence, agents, and API.
-- `apps/web/`: the React/TypeScript/Vite evidence workspace.
-- `evals/`: discovery, frozen regression, and held-out cases.
-- `tests/`, `scripts/`, `prompts/`: added as the corresponding gates are implemented.
-
-Only the controlled Promotion Gate can append v1 after independent verification succeeds. Models and HTTP clients have no activation endpoint. SQLite append-only guards protect history from accidental edits; a host process with database-write access remains trusted. G8, the final Meta demonstration, and the core release tag remain pending mandatory live gates.
-
-## Evidence limits and related work
-
-This build demonstrates one bounded `v0 → v1` repair cycle in a synthetic shared-capacity topology. Held-out cases and fresh-state generation vary parameters within that topology. Preview and commit share a deterministic transition model; agreement establishes that model's semantics, not the fidelity of a real infrastructure deployment. The prototype does not establish production readiness, unknown safety requirements, cross-topology generalization, continual policy evolution, or universal agent safety. Hashes establish artifact integrity and reproducibility; host writers remain trusted, and hashes alone do not authenticate model-call provenance.
-
-Verified policy evolution has related work. [VEPA](https://arxiv.org/abs/2610.12813) combines model-proposed formal policy patches with deterministic verification and controlled activation. [ActGov](https://arxiv.org/abs/2609.24446) checks tool actions against policies constructed from specifications, tasks, and failure traces. [AutoSpec](https://arxiv.org/abs/2606.24245) evolves safety rules using counterexample-guided synthesis and inductive logic programming. SENTINEL's hackathon contribution is the integrated counterexample-to-repair process with actual SQLite execution, independent safety/utility checks, and paired same-trace Safety Time Machine evidence. The project does not claim research priority or comparative performance against those systems; its Meta contribution still requires genuine permitted runs.
-
-MIT licensed; see [LICENSE](LICENSE).
+MIT licensed. [License](LICENSE)

@@ -48,6 +48,11 @@ For a competition-grade export, use a clean checkout and append `--competition`.
 Missing genuine Meta stages still block the final competition release, even if
 an individual fixture artifact has clean source provenance.
 
+The [offline portfolio launcher](../README.md#run-the-demo) writes fresh runs to
+`.cache/portfolio/<run_id>/`. New runs created in the workspace use run-relative
+artifact names. The browser downloads the JSON record. The CLI exporter adds the
+original reports, SQLite snapshots, and Git source for independent verification.
+
 The exporter rejects unresolved source commits, changing files, SQLite sidecars,
 credential fields, and symlinks. The package intentionally excludes the persistent
 spending ledger: replaying recorded evidence never authorizes another model call.

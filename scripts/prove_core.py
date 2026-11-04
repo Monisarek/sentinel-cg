@@ -20,19 +20,20 @@ from apps.sandbox.transitions import parse_action
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def _verification(receipt):
+def _verification(receipt, directory):
     if receipt["verification_path"] is None:
         return None
-    data = json.loads(Path(receipt["verification_path"]).read_text(encoding="utf-8"))
+    data = json.loads((directory / receipt["verification_path"]).read_text(encoding="utf-8"))
     if digest(data) != receipt["verification_hash"]:
         raise ValueError("verification evidence hash mismatch")
     return {key: data[key] for key in ("status", "checks", "case_counts", "measured_counts", "frozen_suite_hashes")}
 
 
-def prove_core(output_root: Path) -> dict:
+def prove_core(output_root: Path, *, relative_paths: bool = False) -> dict:
     run_id = "deterministic-core-" + uuid4().hex
     directory = Path(output_root) / run_id
     directory.mkdir(parents=True)
+    artifact_root = directory if relative_paths else None
     initial, task = load_fixture()
     registry = PolicyRegistry.create(directory / "policies.sqlite3", initial, task)
     frozen = frozen_suite_hashes()
@@ -42,11 +43,13 @@ def prove_core(output_root: Path) -> dict:
     if fixture["evidence_kind"] != "deterministic_test_fixture":
         raise ValueError("offline proof requires explicitly labeled handcrafted input")
     trace = fixture["original_proposals"]
-    rejected = registry.consider(fixture["negative_control_patch"], initial, task, trace, directory / "negative-control")
-    negative_report = _verification(rejected)
+    rejected = registry.consider(fixture["negative_control_patch"], initial, task, trace, directory / "negative-control",
+                                 artifact_root=artifact_root)
+    negative_report = _verification(rejected, directory)
     active_after_rejection = registry.active
-    promoted = registry.consider(fixture["candidate_patch"], initial, task, trace, directory / "candidate-verification")
-    candidate_report = _verification(promoted)
+    promoted = registry.consider(fixture["candidate_patch"], initial, task, trace, directory / "candidate-verification",
+                                 artifact_root=artifact_root)
+    candidate_report = _verification(promoted, directory)
     current = registry.active
     safe, machine = None, None
     if promoted["promoted"]:
@@ -72,7 +75,8 @@ def prove_core(output_root: Path) -> dict:
                     and all(e["outcome"] == "EXECUTED" and e["policy"] == "v1"
                             and e["policy_hash"] == current.policy_hash for e in gateway.events)}
         machine = replay(initial, task, trace, current.patch, directory / "time-machine",
-                         policy_hash_v1=current.policy_hash, policy_hash_v0=baseline.policy_hash)
+                         policy_hash_v1=current.policy_hash, policy_hash_v0=baseline.policy_hash,
+                         artifact_root=artifact_root)
     checks = {
         "negative_control_rejected_by_utility": rejected["promoted"] is False and negative_report is not None
             and negative_report["status"] == "FAIL"
@@ -112,7 +116,7 @@ def prove_core(output_root: Path) -> dict:
         "known_limitations": ["Handcrafted test fixture; no autonomous discovery or model-generated repair.",
                               "Meta-dependent acceptance remains pending genuine permitted Meta calls.",
                               "Held-out cases are excluded from synthesis context; the public repository is not a secrecy boundary."],
-        "evidence_path": str((directory / "evidence.json").resolve()),
+        "evidence_path": "evidence.json" if relative_paths else str((directory / "evidence.json").resolve()),
     }
     evidence["bundle_hash"] = digest(evidence)
     with (directory / "evidence.json").open("x", encoding="utf-8") as output:

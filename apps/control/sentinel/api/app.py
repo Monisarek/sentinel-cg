@@ -116,7 +116,7 @@ def create_app(output_root: Path = ROOT / ".cache/core", static_root: Path = ROO
 
     @app.post("/api/runs")
     def start_run():
-        result = prove_core(output_root)
+        result = prove_core(output_root, relative_paths=True)
         return load_evidence(output_root, result["run_id"])
 
     @app.get("/api/runs/{run_id}")

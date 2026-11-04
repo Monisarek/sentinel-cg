@@ -545,6 +545,7 @@ def _proof(data, directory):
     if "frozen_suite_hashes" in data:
         _equal(data["frozen_suite_hashes"], frozen_suite_hashes(), "frozen suites")
     fixture = data["evidence_kind"] == "deterministic_test_fixture"
+    _require(data["gates"].get("G8") != "PASS", "portable evidence cannot establish submission and judging acceptance")
     if fixture or not data.get("real_model_call"):
         for gate in ("G3", "G4_AI", "G7_AI"):
             _require(data["gates"].get(gate) != "PASS", "offline evidence cannot establish live AI gates")

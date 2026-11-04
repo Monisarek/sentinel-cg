@@ -86,6 +86,9 @@ class EvidenceAPITests(unittest.TestCase):
     def test_download_preserves_original_json_bytes(self):
         original = (self.root / self.run_id / "evidence.json").read_bytes()
         self.assertEqual(self.client.get("/api/runs/" + self.run_id + "/download").content, original)
+        self.assertNotIn(str(self.root), json.dumps(json.loads(original), ensure_ascii=False).replace("\\\\", "\\"))
+        self.assertEqual(self.evidence["candidate"]["receipt"]["verification_path"], "candidate-verification/evidence.json")
+        self.assertEqual(self.evidence["counterfactual_replay"]["forks"]["v1"]["sandbox_path"], "time-machine/v1.sqlite3")
 
     def test_full_and_partial_meta_runtime_formats_keep_honest_provenance(self):
         full = run_fixture(self.root)

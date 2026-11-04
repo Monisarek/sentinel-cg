@@ -30,6 +30,9 @@
 
 ## Implementation order
 
+- The current deliverable is a locally reproducible offline portfolio demo. Keep competition gates and historical evidence separate from portfolio acceptance. Use no live inference or paid services for portfolio work.
+- Make targeted usability and reliability fixes to the existing workspace. Publish checked portfolio changes to `build`. Merging into `main` or creating a final release tag requires separate owner approval.
+
 - Work on `build`; preserve `main`. Complete G1 through G8 in specification order, reporting actual evidence at each gate.
 - First prove real shared-capacity state transitions: permitted staging actions degrade production, an independent Safety Oracle detects the violation, and a safe staging repair succeeds.
 - Build the deterministic proof before UI. Keep Python/FastAPI, SQLite, and later React/TypeScript/Vite; add dependencies only when a gate requires them.
