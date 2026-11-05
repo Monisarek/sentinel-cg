@@ -1,6 +1,8 @@
 """Explicit ChatGPT-subscription execution through the official Codex CLI."""
 
 import subprocess
+import os
+import re
 from copy import deepcopy
 
 from apps.control.sentinel.agents.codex import CodexStructuredClient, CodexAgentDriver
@@ -39,6 +41,13 @@ class CodexSubscriptionClient(CodexStructuredClient):
         except subprocess.TimeoutExpired:
             raise ProviderTransportError("Codex subscription request exceeded the experiment deadline") from None
         self.budget.remaining_seconds(self.budget_role)
+        if result.returncode and not result.stdout.strip():
+            message = result.stderr.replace(str(options["cwd"]), "<request-directory>")
+            if os.environ.get("USERPROFILE"):
+                message = message.replace(os.environ["USERPROFILE"], "<user-home>")
+            message = re.sub(r"(?:LLM[_|]|sk-|ghp_)[A-Za-z0-9_|.-]+", "<redacted>", message)
+            self.diagnostics.append({"error_category": "CLI_EXECUTION_ERROR", "message": message[:2000]})
+            raise ProviderTransportError("Codex CLI stopped before producing structured events")
         return result
 
 
