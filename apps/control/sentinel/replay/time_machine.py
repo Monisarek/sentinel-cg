@@ -23,6 +23,7 @@ def replay(
     policy_hash_v0: str | None = None,
     source_live_run_id: str | None = None, input_evidence_kind: str = "deterministic_test_fixture",
     artifact_root: Path | None = None,
+    source_provider: str = "meta",
 ) -> dict:
     """Counterfactual execution only; no model discovery or policy activation."""
     if type(proposals) is not list or any(type(proposal) is not dict for proposal in proposals):
@@ -96,8 +97,9 @@ def replay(
         "schema_version": 1, "gate": "G6", "status": "PASS" if all(checks.values()) else "FAIL",
         "evidence_kind": replay_kind, "input_evidence_kind": input_evidence_kind,
         "execution_mode": "fixed_trace_counterfactual_replay",
-        "provider": None, "real_model_call": False, "meta_confirmation": "SOURCE_RUN" if source_live_run_id else "PENDING",
-        "source_provider": "meta" if source_live_run_id else None,
+        "provider": None, "real_model_call": False,
+        "meta_confirmation": "SOURCE_RUN" if source_live_run_id and source_provider == "meta" else "PENDING",
+        "source_provider": source_provider if source_live_run_id else None,
         "source_live_run_id": source_live_run_id, "source_trace_hash": trace_hash,
         "initial_state_hash": initial_hash, "recorded_trace": trace, "recorded_trace_hash": trace_hash,
         "policy_hash_v0": policy_hash_v0, "policy_hash_v1": policy_hash_v1 or patch_hash,

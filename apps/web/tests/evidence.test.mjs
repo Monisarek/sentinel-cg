@@ -322,3 +322,70 @@ test("the Trusted Safety Contract uses only the recorded host task minimum with 
   assert.match(render(raw), /Trusted Safety Contract/);
   assert.match(render(raw), /UNVERIFIED/);
 });
+
+test("Codex runtime uses the shared replay view and preserves fixture provenance and historical gates", () => {
+  const raw = runtime();
+  raw.execution_mode = "codex_policy_repair_cycle";
+  raw.provider = "codex";
+  raw.inference_configuration = { reasoning_effort: "medium" };
+  raw.gates = { G3: "PASS", G4_AI: "PASS", G7_AI: "PASS" };
+  for (const role of ["red", "blue", "reattack"]) {
+    const provenance = raw.stages[role].model_calls[0].provenance;
+    Object.assign(provenance, { provider: "codex", model_id: "gpt-6.1-sol", session_id: "unit-codex-session", reasoning_effort: "medium" });
+    delete provenance.response_id;
+  }
+  const before = JSON.stringify(raw);
+  const view = normalizeEvidence(raw);
+  assert.equal(view.format, "codex");
+  assert.equal(view.reasoning_effort, "medium");
+  assert.equal(view.model_calls[0].response_id, "unit-codex-session");
+  assert.equal(view.model_calls[0].reasoning_effort, "medium");
+  assert.equal(sourceLabel(view), "Deterministic test fixture");
+  assert.strictEqual(view.counterfactual_replay.forks, raw.stages.replay.forks);
+  assert.deepEqual([view.gates.G3, view.gates.G4_AI, view.gates.G7_AI], ["PENDING", "PENDING", "PENDING"]);
+  const html = render(raw);
+  assert.match(html, /Codex experiment evidence/);
+  assert.match(html, /gpt-6.1-sol/);
+  assert.match(html, /unit-codex-session/);
+  assert.match(html, /medium/);
+  assert.match(html, /Pipeline and policy assurance/);
+  assert.doesNotMatch(html, /Gate status requires genuine Meta/);
+  assert.equal(JSON.stringify(raw), before);
+});
+
+test("partial Codex records keep failures and never infer replay from source proposals", () => {
+  const raw = runtime();
+  Object.assign(raw, { execution_mode: "codex_policy_repair_cycle", provider: "codex", status: "FAIL",
+    runtime_status: "STOPPED", error_category: "PROVIDER_BLOCKED",
+    failure: { phase: "red", message: "Explicit unit-fixture refusal." } });
+  raw.stages.red.model_calls = [];
+  for (const role of ["blue", "verification", "replay", "reattack"]) raw.stages[role] = null;
+  raw.counterfactual_replay = replay();
+  const view = normalizeEvidence(raw);
+  assert.equal(view.status, "FAIL");
+  assert.equal(view.stages[0].status, "STOPPED");
+  assert.equal(view.counterfactual_replay, null);
+  assert.equal(view.reasoning_effort, "Unrecorded");
+  assert.match(render(raw), /Explicit unit-fixture refusal/);
+  assert.throws(() => normalizeEvidence({ ...raw, provider: "meta" }), /unsupported Evidence Bundle/);
+});
+
+test("Codex source labeling requires recorded Codex call provenance and never awards Meta gates", () => {
+  const raw = runtime();
+  // Synthetic protocol contract only. This object is never emitted as experiment evidence.
+  Object.assign(raw, { execution_mode: "codex_policy_repair_cycle", provider: "codex",
+    evidence_kind: "genuine_live_provider_run", real_model_call: true });
+  assert.equal(sourceLabel(normalizeEvidence(raw)), "Codex runtime attempt");
+  for (const role of ["red", "blue", "reattack"]) {
+    Object.assign(raw.stages[role].model_calls[0].provenance,
+      { provider: "codex", real_model_call: true, evaluation_status: "unit-protocol-contract" });
+  }
+  raw.gates = { G3: "PASS", G4_AI: "PASS", G7_AI: "PASS" };
+  const view = normalizeEvidence(raw);
+  assert.equal(sourceLabel(view), "Recorded Codex runtime");
+  assert.equal(view.candidate_origin, "Recorded Codex proposal");
+  assert.deepEqual([view.gates.G3, view.gates.G4_AI, view.gates.G7_AI], ["PENDING", "PENDING", "PENDING"]);
+  raw.stages.reattack.verified_counterexample = true;
+  assert.equal(normalizeEvidence(raw).status, "FAIL");
+  assert.equal(normalizeEvidence(raw).policy_assurance_status, "BYPASSED");
+});

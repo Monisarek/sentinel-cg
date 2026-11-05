@@ -61,12 +61,12 @@ def load_authorization(path: Path | None, *, config_bytes: bytes | None = None):
     return approval, pricing, models
 
 
-def _base_evidence(directory, seed, kind):
+def _base_evidence(directory, seed, kind, provider="meta"):
     initial, task = seeded_state(seed)
     return {
         "schema_version": 1, "run_id": directory.name, "scenario_id": "shared-capacity-cascade",
-        "seed": seed, "evidence_kind": kind, "execution_mode": "meta_policy_repair_cycle",
-        "provider": "meta", "real_model_call": False, "meta_confirmation": "PENDING",
+        "seed": seed, "evidence_kind": kind, "execution_mode": provider + "_policy_repair_cycle",
+        "provider": provider, "real_model_call": False, "meta_confirmation": "PENDING",
         "status": "FAIL", "runtime_status": "PENDING", "error_category": None,
         "pipeline_status": None, "re_attack_outcome": "NOT_RUN", "policy_assurance_status": "NOT_EVALUATED",
         "project_git_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
@@ -89,30 +89,35 @@ def _save(directory, evidence, budget=None):
     temporary.replace(directory / "evidence.json")
 
 
-def _validate_calls(calls, fixture):
+def _validate_calls(calls, fixture, provider="meta"):
     if not calls:
         raise InferenceSchemaError("A completed inference stage requires recorded model responses")
     for call in calls:
         provenance = call["provenance"]
-        if (provenance.get("provider") != "meta" or not provenance.get("model_id")
+        if (provenance.get("provider") != provider or not provenance.get("model_id")
                 or provenance.get("real_model_call") is not (not fixture)):
             raise InferenceSchemaError("Inference provenance does not match this run's declared evidence kind")
         if not fixture and (not provenance.get("response_id") or not provenance.get("prompt_hash")):
-            raise InferenceSchemaError("Live Meta evidence requires actual response IDs and prompt hashes")
+            raise InferenceSchemaError("Live evidence requires actual response IDs and prompt hashes")
 
 
 def _execute_cycle(directory: Path, budget: RuntimeBudget, models: dict, seed: int, *,
                    driver_factory=MetaAgentDriver, synthesizer_factory=MetaPolicySynthesizer,
-                   evidence_kind="genuine_live_provider_run", protocol_binding=None, budget_preflight=None) -> dict:
+                   evidence_kind="genuine_live_provider_run", protocol_binding=None, budget_preflight=None,
+                   provider="meta") -> dict:
     """Factories support explicit unit fixtures; the live CLI never exposes them."""
     if evidence_kind not in ("genuine_live_provider_run", "deterministic_test_fixture"):
         raise ValueError("unknown runtime evidence kind")
+    if provider not in ("meta", "codex"):
+        raise ValueError("unknown runtime provider")
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     fixture = evidence_kind == "deterministic_test_fixture"
-    live_evaluation = not fixture and protocol_binding is not None
-    evidence = _base_evidence(directory, seed, evidence_kind)
+    live_evaluation = provider == "meta" and not fixture and protocol_binding is not None
+    evidence = _base_evidence(directory, seed, evidence_kind, provider)
     evidence["evaluation_variant"] = "deterministic_test_fixture" if fixture else "neutral_primary" if protocol_binding else "unbound_development"
+    if provider == "codex" and not fixture:
+        evidence["evaluation_variant"] = "codex_subscription_portfolio"
     evidence["evaluation_protocol"] = deepcopy(protocol_binding)
     evidence["budget_preflight"] = deepcopy(budget_preflight)
     initial, task = seeded_state(seed)
@@ -124,6 +129,8 @@ def _execute_cycle(directory: Path, budget: RuntimeBudget, models: dict, seed: i
     evidence["inference_configuration"] = {"native_execution_tools": False, "parallel_tool_calls": False,
                                             "synthesis_corrections": 1, "automatic_transport_retries": 0,
                                             "request_timeout_ceiling_seconds": 90, "max_actions_per_red_run": 10}
+    if provider == "codex":
+        evidence["inference_configuration"].update(reasoning_effort="medium", authentication="chatgpt_subscription")
     adapters, phase = {}, "red"
     started = time.monotonic()
 
@@ -160,7 +167,7 @@ def _execute_cycle(directory: Path, budget: RuntimeBudget, models: dict, seed: i
         checkpoint()
         if result["error_category"]:
             raise ProviderError("Inference stage did not complete: " + result["error_category"])
-        _validate_calls(adapter.calls, fixture)
+        _validate_calls(adapter.calls, fixture, provider)
         return result
 
     checkpoint()
@@ -186,7 +193,7 @@ def _execute_cycle(directory: Path, budget: RuntimeBudget, models: dict, seed: i
         candidate = blue.synthesize(blue_input, {"version_id": "v0", "policy_hash": baseline.policy_hash}, policy_schema())
         evidence["stages"]["blue"] = {"run_id": directory.name + "-blue", "candidate_patch": candidate.to_dict(),
                                       "model_calls": deepcopy(blue.calls), "evidence_kind": evidence_kind}
-        _validate_calls(blue.calls, fixture)
+        _validate_calls(blue.calls, fixture, provider)
         evidence["runtime_checks"]["validated_synthesis"] = True
         evidence["gates"]["G4_AI"] = "PASS" if live_evaluation else "PENDING"
         checkpoint()
@@ -217,7 +224,8 @@ def _execute_cycle(directory: Path, budget: RuntimeBudget, models: dict, seed: i
         budget.remaining_seconds("blue")
         machine = replay(initial, task, trace, current.patch, directory / "replay",
                          policy_hash_v0=baseline.policy_hash, policy_hash_v1=current.policy_hash,
-                         source_live_run_id=None if fixture else red["run_id"], input_evidence_kind=evidence_kind)
+                         source_live_run_id=None if fixture else red["run_id"], input_evidence_kind=evidence_kind,
+                         source_provider=provider)
         evidence["stages"]["replay"] = machine
         evidence["runtime_checks"]["verified_counterfactual_replay"] = machine["status"] == "PASS"
         evidence["gates"]["G6"] = machine["status"]
@@ -240,7 +248,7 @@ def _execute_cycle(directory: Path, budget: RuntimeBudget, models: dict, seed: i
         evidence["status"] = "PASS" if all(evidence["runtime_checks"].values()) else "FAIL"
         evidence["runtime_status"] = "COMPLETED"
         evidence["pipeline_status"] = "COMPLETED"
-        evidence["meta_confirmation"] = "PENDING" if fixture else "GENUINE_META_RUNS_RECORDED"
+        evidence["meta_confirmation"] = "GENUINE_META_RUNS_RECORDED" if provider == "meta" and not fixture else "PENDING"
     except Exception as failure:
         evidence["runtime_status"] = "STOPPED"
         evidence["pipeline_status"] = "STOPPED"

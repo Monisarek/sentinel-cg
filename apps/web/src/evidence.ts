@@ -25,7 +25,7 @@ export type Replay = {
 };
 export type RecordedCall = {
   stage: string; provider: string; model_id: string; real_model_call: boolean;
-  evaluation_status: string; response_id: string; prompt_hash: string; usage: JsonRecord;
+  evaluation_status: string; response_id: string; prompt_hash: string; usage: JsonRecord; reasoning_effort: string;
 };
 export type Stage = {
   key: string; title: string; status: string; result: string; error: string;
@@ -33,13 +33,14 @@ export type Stage = {
   oracle: JsonRecord; raw: JsonRecord | null;
 };
 export type Bundle = {
-  raw: JsonRecord; format: "meta" | "offline"; fixture: boolean;
+  raw: JsonRecord; format: "meta" | "codex" | "offline"; fixture: boolean;
   run_id: string; status: string; runtime_status: string; evidence_kind: string; real_model_call: boolean;
   pipeline_status: string; re_attack_outcome: string; policy_assurance_status: string;
   trusted_production_minimum: number | null;
   project_git_commit: string; working_tree_dirty: boolean; initial_state_hash: string; bundle_hash: string;
   provider: string; original_proposals: Proposal[]; gates: Record<string, string>;
   evaluation_variant: string; evaluation_protocol_id: string; evaluation_protocol_hash: string;
+  reasoning_effort: string; runtime_checks: Record<string, boolean>;
   candidate: { patch: Patch | null; receipt: Receipt | null; verification: Verification | null };
   negative_control: { receipt: Receipt; verification: Verification | null } | null;
   safe_repair_after_promotion: { passed: boolean; final_state: Snapshot } | null;
@@ -125,7 +126,8 @@ function stage(key: string, title: string, value: unknown): Stage {
     const source = object(call.provenance);
     return { stage: key, provider: text(source.provider, "Unrecorded"), model_id: text(source.model_id, "Unrecorded"),
       real_model_call: source.real_model_call === true, evaluation_status: text(source.evaluation_status, "Unrecorded"),
-      response_id: text(source.response_id), prompt_hash: text(source.prompt_hash), usage: object(source.usage) };
+      response_id: text(source.response_id, text(source.session_id)), prompt_hash: text(source.prompt_hash),
+      usage: object(source.usage), reasoning_effort: text(source.reasoning_effort, "Unrecorded") };
   });
   const error = [item.error_category, item.error_type, item.error_message].filter(value => typeof value === "string" && value).join(" · ");
   const present = Object.keys(item).length > 0;
@@ -158,14 +160,15 @@ function reAttackAssessment(challenge: JsonRecord, source: JsonRecord, attempted
 /** AI gates require recorded Meta provenance in addition to a reported gate PASS. */
 export function normalizeEvidence(value: unknown): Bundle {
   const raw = object(value);
-  const meta = raw.execution_mode === "meta_policy_repair_cycle";
-  if (typeof raw.run_id !== "string" || (!meta && (!raw.candidate || !raw.checks))) {
+  const codex = raw.execution_mode === "codex_policy_repair_cycle";
+  const runtime = codex || raw.execution_mode === "meta_policy_repair_cycle";
+  if (typeof raw.run_id !== "string" || (codex && raw.provider !== "codex") || (!runtime && (!raw.candidate || !raw.checks))) {
     throw new Error("The server returned an unsupported Evidence Bundle.");
   }
   const fixture = raw.evidence_kind === "deterministic_test_fixture";
   const productionMinimum = object(raw.task).production_minimum;
   const stagesRaw = object(raw.stages);
-  const stages = meta ? [stage("red", "Adversarial Explorer", stagesRaw.red), stage("blue", "Policy Synthesizer", stagesRaw.blue),
+  const stages = runtime ? [stage("red", "Adversarial Explorer", stagesRaw.red), stage("blue", "Policy Synthesizer", stagesRaw.blue),
     stage("verification", "Independent verification", stagesRaw.verification), stage("replay", "Safety Time Machine", stagesRaw.replay),
     stage("reattack", "Fresh adaptive re-attack", stagesRaw.reattack)] : [];
   const failure = object(raw.failure);
@@ -176,7 +179,7 @@ export function normalizeEvidence(value: unknown): Bundle {
   }
   const calls = stages.flatMap(item => item.calls);
   const reattack = reAttackAssessment(object(stagesRaw.reattack), object(stagesRaw.red),
-    meta && (stagesRaw.reattack !== null && stagesRaw.reattack !== undefined || failure.phase === "reattack"));
+    runtime && (stagesRaw.reattack !== null && stagesRaw.reattack !== undefined || failure.phase === "reattack"));
   // Legacy bundles receive the same conservative display; the source JSON stays unchanged.
   const bypassed = reattack.assurance === "BYPASSED" || raw.policy_assurance_status === "BYPASSED" || raw.re_attack_outcome === "NEW_VERIFIED_COUNTEREXAMPLE_FOUND";
   const inconclusive = reattack.assurance === "INCONCLUSIVE" || raw.policy_assurance_status === "INCONCLUSIVE" || raw.re_attack_outcome === "INCONCLUSIVE";
@@ -201,25 +204,25 @@ export function normalizeEvidence(value: unknown): Bundle {
   for (const key of Object.keys(aiEvidence)) gates[key] ??= "PENDING";
   const candidate = object(raw.candidate);
   const verificationStage = object(stagesRaw.verification);
-  const evaluation = meta ? object(verificationStage.evaluation) : object(candidate.verification);
-  const candidatePatch = patch(meta ? object(stagesRaw.blue).candidate_patch : candidate.patch);
+  const evaluation = runtime ? object(verificationStage.evaluation) : object(candidate.verification);
+  const candidatePatch = patch(runtime ? object(stagesRaw.blue).candidate_patch : candidate.patch);
   const negative = object(raw.negative_control);
   const negativeReceipt = receipt(negative.receipt);
   const postRepair = object(raw.safe_repair_after_promotion);
   const utilityRun = object(object(evaluation.runs)["regression-canonical-utility-candidate"]);
   const utilityStates = Array.isArray(utilityRun.committed_states) ? utilityRun.committed_states : [];
   const utilityFinal = utilityRun.persisted_final_state ?? utilityStates.at(-1);
-  const machineRaw = meta ? object(stagesRaw.replay) : object(raw.counterfactual_replay);
-  const traceRaw = meta ? machineRaw.recorded_trace : raw.original_proposals;
+  const machineRaw = runtime ? object(stagesRaw.replay) : object(raw.counterfactual_replay);
+  const traceRaw = runtime ? machineRaw.recorded_trace : raw.original_proposals;
   const trace = Array.isArray(traceRaw) && traceRaw.every(proposal) ? traceRaw : [];
-  // Meta forks and actions come exclusively from its recorded replay stage.
+  // Runtime forks and actions come exclusively from the recorded replay stage.
   const machine = replay(machineRaw, trace);
   const errors = [raw.error_category, ...Array.isArray(raw.blocked_reasons) ? raw.blocked_reasons : [],
     ...Object.values(object(raw.failure)), ...Object.values(object(raw.authorization_error))]
     .filter((value): value is string => typeof value === "string" && !!value);
   return {
-    raw, format: meta ? "meta" : "offline", fixture, run_id: raw.run_id,
-    status: meta && ["BYPASSED", "INCONCLUSIVE"].includes(assurance) ? "FAIL" : text(raw.status, "PENDING"),
+    raw, format: codex ? "codex" : runtime ? "meta" : "offline", fixture, run_id: raw.run_id,
+    status: runtime && ["BYPASSED", "INCONCLUSIVE"].includes(assurance) ? "FAIL" : text(raw.status, "PENDING"),
     runtime_status: text(raw.runtime_status, text(raw.status, "PENDING")), evidence_kind: text(raw.evidence_kind, "Unrecorded"),
     pipeline_status: text(raw.pipeline_status, raw.runtime_status === "COMPLETED" ? "COMPLETED" : ["BLOCKED", "STOPPED"].includes(text(raw.runtime_status)) ? "STOPPED" : raw.status === "FAIL" ? "FAILED" : "PENDING"),
     re_attack_outcome: outcome, policy_assurance_status: assurance,
@@ -228,9 +231,11 @@ export function normalizeEvidence(value: unknown): Bundle {
     evaluation_variant: text(raw.evaluation_variant, fixture ? "deterministic_test_fixture" : "unregistered"),
     evaluation_protocol_id: text(object(object(raw.evaluation_protocol).protocol).protocol_id, "Unrecorded"),
     evaluation_protocol_hash: text(object(raw.evaluation_protocol).protocol_hash, "Unrecorded"),
+    reasoning_effort: text(object(raw.inference_configuration).reasoning_effort, text(raw.reasoning_effort, "Unrecorded")),
+    runtime_checks: runtimeChecks,
     project_git_commit: text(raw.project_git_commit, "Unrecorded"), working_tree_dirty: raw.working_tree_dirty === true,
     initial_state_hash: text(raw.initial_state_hash), bundle_hash: text(raw.bundle_hash), original_proposals: machine ? trace : [], gates,
-    candidate: { patch: candidatePatch, receipt: receipt(meta ? verificationStage : candidate.receipt), verification: verification(evaluation) },
+    candidate: { patch: candidatePatch, receipt: receipt(runtime ? verificationStage : candidate.receipt), verification: verification(evaluation) },
     negative_control: negativeReceipt ? { receipt: negativeReceipt, verification: verification(negative.verification) } : null,
     safe_repair_after_promotion: snapshot(postRepair.final_state) ? { passed: postRepair.passed === true, final_state: postRepair.final_state } : null,
     verified_utility: snapshot(utilityFinal) ? { passed: object(utilityRun.safety).safe === true && object(utilityRun.utility).completed === true,
@@ -238,12 +243,15 @@ export function normalizeEvidence(value: unknown): Bundle {
     counterfactual_replay: machine, stages, model_calls: calls, errors: [...new Set(errors)],
     replay_notice: Object.keys(machineRaw).length > 0 ? "The recorded replay does not contain two complete committed-state traces. Inspect its stage evidence below."
       : "Counterfactual replay has not been recorded. No comparison states are inferred from agent proposals.",
-    candidate_origin: fixture ? "Deterministic test fixture" : meta ? "Recorded Meta proposal" : text(raw.candidate_origin, "Unrecorded"),
+    candidate_origin: fixture ? "Deterministic test fixture" : runtime ? `Recorded ${codex ? "Codex" : "Meta"} proposal` : text(raw.candidate_origin, "Unrecorded"),
   };
 }
 
 export function sourceLabel(bundle: Bundle): string {
   if (bundle.fixture) return "Deterministic test fixture";
+  if (bundle.provider === "codex") return bundle.evidence_kind === "genuine_live_provider_run"
+    && bundle.real_model_call && bundle.model_calls.some(call => call.provider === "codex" && call.real_model_call)
+    ? "Recorded Codex runtime" : "Codex runtime attempt";
   if (bundle.evidence_kind === "genuine_live_provider_run" && bundle.real_model_call && bundle.model_calls.some(call => call.provider === "meta" && call.real_model_call)) return "Recorded Meta runtime";
   return bundle.format === "meta" ? "Meta runtime attempt" : "Recorded deterministic execution";
 }

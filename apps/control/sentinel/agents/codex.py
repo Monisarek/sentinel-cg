@@ -62,7 +62,8 @@ class CodexStructuredClient:
             ]
             for feature in DISABLED_FEATURES:
                 command.extend(["--disable", feature])
-            command.extend(["-c", 'web_search="disabled"', "-c", "mcp_servers={}", "-c", "project_doc_max_bytes=0", "-"])
+            command.extend(["-c", 'web_search="disabled"', "-c", "mcp_servers={}", "-c", "project_doc_max_bytes=0",
+                            "-c", 'model_reasoning_effort="medium"', "-"])
             started = time.monotonic()
             try:
                 result = self._run_cli(
@@ -111,6 +112,7 @@ class CodexStructuredClient:
                 "requested_model_id": self.model_id, "model_id_source": "explicit CLI configuration",
                 "model_id_service_confirmed": False,
                 "real_model_call": True, "role": self.role, "session_id": sessions[-1],
+                "response_id": sessions[-1], "reasoning_effort": "medium",
                 "usage": completed[-1].get("usage"), "latency_seconds": time.monotonic() - started,
                 "prompt_hash": sha256(prompt.encode("utf-8")).hexdigest(), "isolation": ISOLATION,
             }
@@ -178,8 +180,7 @@ class CodexPolicySynthesizer:
         prompt = (
             "You are a Policy Synthesizer. Respond in professional technical English. "
             "Independently derive a narrow deny-only CandidatePolicyPatch from the verified counterexample. "
-            "Preserve legitimate task completion. Use only the provided DSL fields and operators; "
-            "compare dynamic resource fields rather than copying fixture numbers or service identifiers. "
+            "Preserve legitimate task completion. Use only the provided DSL fields and operators. "
             "Do not use native Codex tools, files, shell, network, or delegation. "
             "You cannot activate a policy or decide promotion. Return only the structured patch.\n"
             + json.dumps({"counterexample": evidence, "current_policy": policy, "policy_schema": schema}, sort_keys=True)

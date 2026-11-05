@@ -100,6 +100,42 @@ class PortableEvidenceTests(unittest.TestCase):
         self.assertFalse(any("spending" in name or ".env" in name or "authorization" in name for name in names))
         self.assertEqual((self.meta_package / "artifacts/evidence.json").read_bytes(), Path(self.meta["evidence_path"]).read_bytes())
 
+    def test_codex_runtime_fixture_retains_sqlite_verification_and_pending_competition_gates(self):
+        # Schema compatibility only; preserve explicit offline call provenance.
+        source = self.work / "codex-source"
+        shutil.copytree(Path(self.meta["evidence_path"]).parent, source)
+        data = deepcopy(self.meta)
+        data.update(provider="codex", execution_mode="codex_policy_repair_cycle")
+        for role in ("red", "blue", "reattack"):
+            for call in data["stages"][role]["model_calls"]:
+                call["provenance"]["provider"] = "codex"
+        data.pop("bundle_hash")
+        data["bundle_hash"] = digest(data)
+        write_json(source / "evidence.json", data)
+        package = self.work / "codex-package"
+        export_evidence(source / "evidence.json", package)
+        verdict = verify_evidence(package)
+        self.assertEqual(verdict["runtime_status"], "COMPLETED")
+        self.assertEqual(verdict["evidence_kind"], "deterministic_test_fixture")
+        self.assertEqual(verdict["gates"]["G3"], "PENDING")
+        artifact = package / "artifacts/evidence.json"
+        data["gates"]["G3"] = "PASS"
+        write_json(artifact, data)
+        reseal_package(package)
+        with self.assertRaisesRegex(ValueError, "Codex competition gate G3"):
+            verify_evidence(package)
+        data["gates"]["G3"] = "PENDING"
+        data["stages"]["red"]["model_calls"][0]["provenance"]["provider"] = "meta"
+        write_json(artifact, data)
+        reseal_package(package)
+        with self.assertRaisesRegex(ValueError, "invalid recorded model provenance"):
+            verify_evidence(package)
+        data.update(provider=None, execution_mode="unknown_runtime")
+        write_json(artifact, data)
+        reseal_package(package)
+        with self.assertRaisesRegex(ValueError, "unsupported evidence format"):
+            verify_evidence(package)
+
     def test_competition_export_rejects_dirty_source_and_verifier_before_copy(self):
         source = self.work / "source-fixture"
         shutil.copytree(Path(self.core["evidence_path"]).parent, source)

@@ -37,10 +37,21 @@ def run(output_root: Path, model_id: str) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output-dir", type=Path, default=Path(".cache/codex"))
+    parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--model", default="gpt-6.1-sol")
+    parser.add_argument("--subscription", action="store_true",
+                        help="Run the authorized GPT-6.1 Sol medium portfolio experiment through ChatGPT login")
     arguments = parser.parse_args()
-    evidence = run(arguments.output_dir, arguments.model)
+    if arguments.subscription:
+        from apps.control.sentinel.evaluation.codex_runtime import run_codex
+        if arguments.model != "gpt-6.1-sol":
+            parser.error("The subscription experiment uses gpt-6.1-sol")
+        evidence = run_codex(arguments.output_dir or Path(".cache/codex-cycles"))
+        print(json.dumps({key: evidence[key] for key in (
+            "run_id", "provider", "status", "runtime_status", "policy_assurance_status",
+            "runtime_checks", "gates", "evidence_path")}, indent=2))
+        return 0 if evidence["status"] == "PASS" else 1
+    evidence = run(arguments.output_dir or Path(".cache/codex"), arguments.model)
     print(json.dumps({key: evidence[key] for key in (
         "run_id", "provider", "evaluation_status", "model_id", "real_model_call", "status",
         "result", "executed_actions", "oracle_verdicts", "final_state", "evidence_path",

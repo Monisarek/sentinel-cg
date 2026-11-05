@@ -17,7 +17,7 @@ from scripts.prove_core import prove_core
 
 
 ROOT = Path(__file__).resolve().parents[4]
-RUN_ID = re.compile(r"(?:deterministic-core|meta-cycle|meta-runtime-fixture)-[0-9a-f]{32}")
+RUN_ID = re.compile(r"(?:deterministic-core|meta-cycle|meta-runtime-fixture|codex-cycle)-[0-9a-f]{32}")
 
 
 def _snapshot_hash(path: Path) -> str:
@@ -43,11 +43,18 @@ def load_evidence(output_root: Path, run_id: str) -> dict:
         data = json.loads((directory / "evidence.json").read_text(encoding="utf-8"))
         if data["run_id"] != run_id or digest({key: value for key, value in data.items() if key != "bundle_hash"}) != data["bundle_hash"]:
             raise ValueError("bundle hash mismatch")
-        if data["evidence_kind"] not in {"deterministic_test_fixture", "genuine_live_provider_run", "meta_runtime_attempt"}:
+        if data["evidence_kind"] not in {"deterministic_test_fixture", "genuine_live_provider_run", "meta_runtime_attempt", "codex_runtime_attempt"}:
             raise ValueError("unsupported evidence provenance")
         if "stages" in data:
-            if data["provider"] != "meta":
+            expected_provider = {"meta_policy_repair_cycle": "meta", "codex_policy_repair_cycle": "codex"}.get(data["execution_mode"])
+            if expected_provider is None or expected_provider != data["provider"]:
                 raise ValueError("unsupported runtime provider")
+            for role in ("red", "blue", "reattack"):
+                for call in (data["stages"].get(role) or {}).get("model_calls", []):
+                    if call["provenance"].get("provider") != data["provider"]:
+                        raise ValueError("recorded call provider mismatch")
+            if data["provider"] == "codex" and any(data["gates"].get(gate) != "PENDING" for gate in ("G3", "G4_AI", "G7_AI", "G8")):
+                raise ValueError("Codex evidence cannot establish competition gates")
             verification = data["stages"].get("verification")
             if verification and verification.get("verification_hash"):
                 report = json.loads((directory / "verification/evidence.json").read_text(encoding="utf-8"))
@@ -97,7 +104,9 @@ def create_app(output_root: Path = ROOT / ".cache/core", static_root: Path = ROO
     output_root = Path(output_root).resolve()
     roots = [output_root]
     if output_root == (ROOT / ".cache/core").resolve():
-        roots += [ROOT / ".cache/meta", ROOT / ".cache/meta-runtime-fixtures"]
+        roots += [ROOT / ".cache/meta", ROOT / ".cache/meta-runtime-fixtures", ROOT / ".cache/codex-cycles"]
+    elif output_root == (ROOT / ".cache/portfolio").resolve():
+        roots += [ROOT / ".cache/codex-cycles"]
     app = FastAPI(title="SENTINEL Evidence Workspace", docs_url=None, redoc_url=None)
 
     def locate(run_id):

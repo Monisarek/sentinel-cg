@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 from apps.control.sentinel.api.app import create_app
 from apps.control.sentinel.agents.budget import RuntimeBudget
 from apps.control.sentinel.evaluation.meta_runtime import _execute_cycle
+from apps.control.sentinel.policy.versions import digest
 from tests.test_meta_runtime import FixtureHarness, MODELS, approval, prices, run_fixture
 
 
@@ -110,6 +111,42 @@ class EvidenceAPITests(unittest.TestCase):
         self.assertIsNotNone(full["stages"]["replay"])
         self.assertIsNone(partial["stages"]["replay"])
         self.assertNotIn("event: gateway", self.client.get("/api/runs/" + partial["run_id"] + "/events").text)
+
+    def test_codex_runtime_fixture_is_served_without_awarding_competition_gates(self):
+        # Schema compatibility only; this fixture records no genuine model calls.
+        source = run_fixture(self.root)
+        original = self.root / source["run_id"]
+        source["run_id"] = "codex-cycle-" + uuid4().hex
+        directory = self.root / source["run_id"]
+        original.rename(directory)
+        source.update(provider="codex", execution_mode="codex_policy_repair_cycle")
+        for role in ("red", "blue", "reattack"):
+            for call in source["stages"][role]["model_calls"]:
+                call["provenance"]["provider"] = "codex"
+
+        def save():
+            source.pop("bundle_hash", None)
+            source["bundle_hash"] = digest(source)
+            (directory / "evidence.json").write_text(json.dumps(source), encoding="utf-8")
+
+        save()
+        prefix = "/api/runs/" + source["run_id"]
+        response = self.client.get(prefix)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["provider"], "codex")
+        self.assertFalse(response.json()["real_model_call"])
+        self.assertEqual(self.client.get(prefix + "/download").content, (directory / "evidence.json").read_bytes())
+        self.assertIn("event: gateway", self.client.get(prefix + "/events").text)
+        source["gates"]["G3"] = "PASS"
+        save()
+        self.assertEqual(self.client.get(prefix).status_code, 409)
+        source["gates"]["G3"] = "PENDING"
+        source["stages"]["red"]["model_calls"][0]["provenance"]["provider"] = "meta"
+        save()
+        self.assertEqual(self.client.get(prefix).status_code, 409)
+        source.update(provider=None, execution_mode="unknown_runtime")
+        save()
+        self.assertEqual(self.client.get(prefix).status_code, 409)
 
 
 if __name__ == "__main__":

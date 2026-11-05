@@ -122,7 +122,7 @@ def _artifacts(data, directory):
     """Select known run artifacts, never filesystem-walk credentials or follow JSON paths."""
     names = ["evidence.json"]
     core = data["execution_mode"] == "offline_verified_policy_repair"
-    _require(core or data["execution_mode"] == "meta_policy_repair_cycle", "unsupported evidence format")
+    _require(core or data["execution_mode"] in ("meta_policy_repair_cycle", "codex_policy_repair_cycle"), "unsupported evidence format")
     if core or data.get("policy_versions") or (directory / "policies.sqlite3").exists():
         names.append("policies.sqlite3")
     if core:
@@ -524,7 +524,7 @@ def _claims(data, reports, versions, machine):
     for gate, role, fact in (("G3", "red", "verified_discovery"), ("G4_AI", "blue", "validated_synthesis"),
                               ("G7_AI", "reattack", "fresh_re_attack_completed")):
         if data["gates"].get(gate) == "PASS":
-            _require(real[role] and facts[fact] and data["runtime_checks"].get(fact) is True,
+            _require(data["provider"] == "meta" and real[role] and facts[fact] and data["runtime_checks"].get(fact) is True,
                      "live gate requires genuine recorded stage calls and verification")
     for gate, fact in (("G5", "verified_promotion"), ("G6", "verified_counterfactual_replay")):
         if data["gates"].get(gate) == "PASS":
@@ -538,6 +538,13 @@ def _proof(data, directory):
     _sealed(data, "bundle_hash")
     _no_credentials(data)
     core = data["execution_mode"] == "offline_verified_policy_repair"
+    if not core:
+        _require(data["provider"] in ("meta", "codex") and
+                 {"meta_policy_repair_cycle": "meta", "codex_policy_repair_cycle": "codex"}.get(data["execution_mode"]) == data["provider"],
+                 "runtime provider differs from execution mode")
+        if data["provider"] == "codex":
+            for gate in ("G3", "G4_AI", "G7_AI", "G8"):
+                _equal(data["gates"].get(gate), "PENDING", "Codex competition gate " + gate)
     initial, task = load_fixture() if core else seeded_state(data["seed"])
     _equal(data["initial_state"], observed_state(initial), "trusted initial state")
     _equal(data["initial_state_hash"], state_hash(initial), "trusted initial hash")
@@ -607,7 +614,7 @@ def _proof(data, directory):
             if stage is not None:
                 for call in stage.get("model_calls", []):
                     provenance = call["provenance"]
-                    _require(provenance.get("provider") == "meta" and bool(provenance.get("model_id")), "invalid recorded model provenance")
+                    _require(provenance.get("provider") == data["provider"] and bool(provenance.get("model_id")), "invalid recorded model provenance")
                     _require(provenance.get("real_model_call") is (not fixture), "model provenance differs from evidence kind")
         challenge = stages.get("reattack")
         if challenge is None and (data.get("failure") or {}).get("phase") == "reattack":
