@@ -16,6 +16,8 @@ decisions, state changes, oracle verdicts, and replay are executed locally.
 [Architecture and trust boundaries](docs/PORTFOLIO.md#architecture-and-trust-boundaries) ·
 [Verify the evidence](docs/VERIFY_EVIDENCE.md)
 
+![Evidence Workspace showing production at 6 under v0 and 8 under verified v1](docs/images/evidence-workspace.png)
+
 ## Run the demo
 
 On Windows, install Git, Python 3.10+ and Node.js 22.12+ with npm. Run from a
@@ -108,8 +110,13 @@ python -m scripts.eval_shield
 python -m scripts.eval_parametric
 ```
 
-The historical evaluation found 84/100 counterexamples with the seeded Random
-Explorer. The Direct Invariant Shield and fixture v1 each blocked 5/5 unsafe
+The clean-checkout acceptance run at `913231e` passed 222 Python tests,
+18 frontend tests, the TypeScript check, and the production build. Baseline
+reruns reproduced 84/100 counterexamples with the seeded Random Explorer.
+The Windows launcher and Chrome walkthrough passed first load, repeated runs,
+JSON download, error recovery, and desktop widths of 1280, 1440, and 1920 pixels,
+with zero page errors or external requests during the walkthrough.
+The Direct Invariant Shield and fixture v1 each blocked 5/5 unsafe
 cases and preserved 20/20 required workflows. The parameter sweep blocked 100/100
 unsafe cases and preserved 500/500 required workflows across the same topology.
 Run identifiers, source provenance, denominators, and limitations are in the
@@ -125,7 +132,7 @@ remain untested.
 
 The project began at the Meta Global AI Developer Hackathon 2026. The optional
 Meta Model API adapter and frozen live evaluation protocol remain in the
-repository. Genuine inference was untested, and competition gates G3, AI-dependent
+repository. Genuine inference remains untested, and competition gates G3, AI-dependent
 G4/G7, and G8 remain PENDING. The historical `offline-core-v0.1` tag identifies
 the earlier offline core. [Engineering specification](docs/ENGINEERING_SPEC.md) ·
 [Frozen live protocol](evals/protocol/live-v1.json)

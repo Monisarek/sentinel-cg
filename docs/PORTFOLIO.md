@@ -115,7 +115,29 @@ scope, stale-state rejection, promotion, replay, evidence tampering, and fronten
 evidence normalization and presentation. The [README](../README.md#checks-and-measurements)
 lists the commands to run them locally.
 
-| Previously recorded experiment | Result | Interpretation |
+The portfolio acceptance run at source commit `913231e` passed 222 Python tests,
+18 frontend tests, the TypeScript check, and the production frontend build in a
+clean Windows checkout. The Windows launcher and Chrome 156 walkthrough passed
+first load, repeated runs, JSON download, error recovery, and desktop widths of
+1280, 1440, and 1920 pixels, with zero page errors or external requests during
+the walkthrough. The same checkout reran the baseline protocols below with the
+recorded results. [Acceptance run IDs](EVALUATION.md#portfolio-acceptance-rerun) ·
+[Actual workspace screenshot](images/evidence-workspace.png)
+
+The browser-created run `deterministic-core-5eefabc26e844a54845a23cfaaf48621`
+was exported from that clean checkout and independently verified from its Git
+source bundle using Python `-S -B`. All 47 artifact hashes passed, with network,
+original-cache reads, and file writes forbidden. Package and verifier-checkout
+hashes were unchanged. The manifest SHA-256 is
+`00ff3d7a03f124c64643041e74f2046d6d4a8ad2953de800a4ce7e2f81f8ee9d`.
+Portfolio acceptance is `OFFLINE_PORTFOLIO_READY`.
+
+This acceptance also verified two targeted fixes. New workspace runs store
+relative artifact names while preserving byte-exact JSON downloads. The
+independent verifier rejects a forged G8 PASS even when bundle and manifest
+hashes are recomputed. Historical bundles retain their original bytes.
+
+| Experiment reproduced at `913231e` | Result | Interpretation |
 | --- | --- | --- |
 | Seeded Random Explorer | 84/100 verified counterexamples within the action budget | A simple baseline finds many violations in this small action space. The record retains all 100 attempts. |
 | Direct Invariant Shield | 5/5 unsafe cases blocked, 20/20 required workflows preserved | The shield matches fixture v1 on these cases. |

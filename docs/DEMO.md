@@ -20,9 +20,9 @@ For the portfolio demo, follow the [local launch instructions](../README.md#run-
 
 The final competition recording must replace the discovery and synthesis sections with genuine Meta evidence and include a fresh adaptive re-attack. Until then, retain the fixture labels and pending claims. No competition-ready PASS is implied by this walkthrough.
 
-## Historical competition release checklist
+## Release checklist
 
-This checklist records requirements, not completed release evidence. Keep the current draft and preserve `main` while mandatory live gates are pending.
+This historical competition checklist records competition requirements. Portfolio acceptance is tracked separately in the [portfolio case study](PORTFOLIO.md).
 
 - [ ] Use a clean, identified source commit; retain every recorded attempt and the frozen protocol/fixture hashes.
 - [ ] Record permitted Meta discovery, synthesis, verification/promotion, and fresh adaptive re-attack with actual model IDs and provenance. Check pipeline completion separately from policy assurance; a bypass is FAIL.

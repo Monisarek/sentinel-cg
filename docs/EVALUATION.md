@@ -101,3 +101,18 @@ python -m scripts.eval_parametric
 The parameter sweep varies only the existing topology's parameters. Its inputs
 and candidate remain `deterministic_test_fixture`; it cannot establish AI
 discovery or generalization to another operational system.
+
+## Portfolio acceptance rerun
+
+The same commands ran from a clean Windows checkout of
+`913231ef80934c4b494e9881eb48d3c21ee4cfd9` with Python 3.10.11. Each command
+returned PASS under its original protocol.
+
+| Run | Observed result |
+| --- | --- |
+| `random-baseline-6d3006539ffc483b88aea230367f7ce4` | 84/100 verified counterexamples, 16 action limits reached, 0 execution failures, median 4 actions among discoveries |
+| `direct-shield-e2b00ff2ee124995969fa4378722ad1c` | Direct shield and fixture v1 each blocked 5/5 unsafe cases, preserved 20/20 workflows, and made 0 false blocks |
+| `parametric-sweep-b283e931faa74f8a8b7ef1066b0ba35b` | Fixture v1 blocked 100/100 unsafe cases and preserved 500/500 workflows, with 0 mutations on DENY and 0 execution errors |
+
+The historical runs and archive above retain their original source provenance.
+These reruns use the same synthetic topology and make zero model calls.
