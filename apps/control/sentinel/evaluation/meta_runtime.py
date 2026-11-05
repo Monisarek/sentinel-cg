@@ -63,6 +63,12 @@ def load_authorization(path: Path | None, *, config_bytes: bytes | None = None):
 
 def _base_evidence(directory, seed, kind, provider="meta"):
     initial, task = seeded_state(seed)
+    evidence_path = (directory / "evidence.json").resolve()
+    if provider == "codex":
+        try:
+            evidence_path = evidence_path.relative_to(ROOT)
+        except ValueError:
+            evidence_path = Path("evidence.json")
     return {
         "schema_version": 1, "run_id": directory.name, "scenario_id": "shared-capacity-cascade",
         "seed": seed, "evidence_kind": kind, "execution_mode": provider + "_policy_repair_cycle",
@@ -75,7 +81,7 @@ def _base_evidence(directory, seed, kind, provider="meta"):
         "gates": {name: "PENDING" for name in ("G3", "G4_AI", "G5", "G6", "G7_AI", "G8")},
         "stages": {name: None for name in ("red", "blue", "verification", "replay", "reattack")},
         "runtime_checks": {}, "budget": None, "blocked_reasons": [],
-        "evidence_path": str((directory / "evidence.json").resolve()),
+        "evidence_path": str(evidence_path),
     }
 
 
@@ -199,10 +205,11 @@ def _execute_cycle(directory: Path, budget: RuntimeBudget, models: dict, seed: i
         checkpoint()
         phase = "verification"
         receipt = registry.consider(candidate, initial, task, trace, directory / "verification",
-                                    input_evidence_kind=evidence_kind, check_budget=lambda: budget.remaining_seconds("blue"))
+                                    input_evidence_kind=evidence_kind, check_budget=lambda: budget.remaining_seconds("blue"),
+                                    artifact_root=directory if provider == "codex" else None)
         evidence["stages"]["verification"] = receipt
         if receipt["verification_path"] is not None:
-            report = json.loads(Path(receipt["verification_path"]).read_text(encoding="utf-8"))
+            report = json.loads((directory / receipt["verification_path"]).read_text(encoding="utf-8"))
             if digest(report) != receipt["verification_hash"]:
                 raise ProviderError("Independent verification artifact hash mismatch")
             evidence["stages"]["verification"]["evaluation"] = report
@@ -225,7 +232,7 @@ def _execute_cycle(directory: Path, budget: RuntimeBudget, models: dict, seed: i
         machine = replay(initial, task, trace, current.patch, directory / "replay",
                          policy_hash_v0=baseline.policy_hash, policy_hash_v1=current.policy_hash,
                          source_live_run_id=None if fixture else red["run_id"], input_evidence_kind=evidence_kind,
-                         source_provider=provider)
+                         source_provider=provider, artifact_root=directory if provider == "codex" else None)
         evidence["stages"]["replay"] = machine
         evidence["runtime_checks"]["verified_counterfactual_replay"] = machine["status"] == "PASS"
         evidence["gates"]["G6"] = machine["status"]
