@@ -5,7 +5,7 @@ import subprocess
 import unittest
 from unittest.mock import patch
 
-from apps.control.sentinel.agents.codex_subscription import CodexSubscriptionClient
+from apps.control.sentinel.agents.codex_subscription import CodexSubscriptionClient, CodexSubscriptionDriver
 from apps.control.sentinel.agents.contracts import DECISION_SCHEMA, ProviderBlocked
 from apps.control.sentinel.agents.budget import BudgetExceeded
 from apps.control.sentinel.evaluation.codex_runtime import CodexSubscriptionBudget
@@ -66,6 +66,13 @@ class SubscriptionTests(unittest.TestCase):
         self.assertFalse(snapshot["api_billing_used"])
         self.assertEqual(snapshot["accounting"], "chatgpt_subscription")
         self.assertNotIn("usd", str(snapshot).lower())
+
+    def test_subscription_schema_declares_existing_positive_value_rule_without_changing_frozen_schema(self):
+        from apps.control.sentinel.agents.codex import CodexAgentDriver
+        self.assertEqual(CodexSubscriptionDriver.action_schema["properties"]["value"]["minimum"], 1)
+        self.assertNotIn("minimum", CodexAgentDriver.action_schema["properties"]["value"])
+        self.assertEqual(CodexSubscriptionDriver.decision_schema["properties"]["action"]["anyOf"][0],
+                         CodexSubscriptionDriver.action_schema)
 
 
 if __name__ == "__main__":

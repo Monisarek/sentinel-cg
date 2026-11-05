@@ -1,9 +1,12 @@
 """The evidence UI serves verified recorded execution and cannot activate policy."""
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Event
 import unittest
+from unittest.mock import patch
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -13,6 +16,23 @@ from apps.control.sentinel.agents.budget import RuntimeBudget
 from apps.control.sentinel.evaluation.meta_runtime import _execute_cycle
 from apps.control.sentinel.policy.versions import digest
 from tests.test_meta_runtime import FixtureHarness, MODELS, approval, prices, run_fixture
+
+
+def codex_fixture(root):
+    """Explicit offline schema fixture with real SQL artifacts and zero model calls."""
+    source = run_fixture(root)
+    original = root / source["run_id"]
+    source["run_id"] = "codex-cycle-" + uuid4().hex
+    directory = root / source["run_id"]
+    original.rename(directory)
+    source.update(provider="codex", execution_mode="codex_policy_repair_cycle")
+    for role in ("red", "blue", "reattack"):
+        for call in source["stages"][role]["model_calls"]:
+            call["provenance"]["provider"] = "codex"
+    source.pop("bundle_hash", None)
+    source["bundle_hash"] = digest(source)
+    (directory / "evidence.json").write_text(json.dumps(source), encoding="utf-8")
+    return source
 
 
 class EvidenceAPITests(unittest.TestCase):
@@ -113,16 +133,8 @@ class EvidenceAPITests(unittest.TestCase):
         self.assertNotIn("event: gateway", self.client.get("/api/runs/" + partial["run_id"] + "/events").text)
 
     def test_codex_runtime_fixture_is_served_without_awarding_competition_gates(self):
-        # Schema compatibility only; this fixture records no genuine model calls.
-        source = run_fixture(self.root)
-        original = self.root / source["run_id"]
-        source["run_id"] = "codex-cycle-" + uuid4().hex
+        source = codex_fixture(self.root)
         directory = self.root / source["run_id"]
-        original.rename(directory)
-        source.update(provider="codex", execution_mode="codex_policy_repair_cycle")
-        for role in ("red", "blue", "reattack"):
-            for call in source["stages"][role]["model_calls"]:
-                call["provenance"]["provider"] = "codex"
 
         def save():
             source.pop("bundle_hash", None)
@@ -147,6 +159,51 @@ class EvidenceAPITests(unittest.TestCase):
         source.update(provider=None, execution_mode="unknown_runtime")
         save()
         self.assertEqual(self.client.get(prefix).status_code, 409)
+
+    def test_local_codex_entry_point_rejects_external_requests_and_serializes_execution(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            codex_root = root / ".cache/codex-cycles"
+            source = codex_fixture(codex_root)
+            expected = json.loads(json.dumps(source))
+            with patch("apps.control.sentinel.api.app.ROOT", root):
+                application = create_app(root / ".cache/portfolio", root / "missing-dist")
+            with TestClient(application, raise_server_exceptions=False) as client, \
+                 patch("apps.control.sentinel.api.app.run_codex", return_value=source) as runner:
+                for endpoint in ("/api/runs", "/api/codex-runs"):
+                    self.assertEqual(client.post(endpoint, headers={"origin": "https://external.example"}).status_code, 403)
+                    self.assertEqual(client.post(endpoint, headers={"sec-fetch-site": "cross-site"}).status_code, 403)
+                    self.assertEqual(client.post(endpoint, headers={"host": "external.example"}).status_code, 400)
+                runner.assert_not_called()
+                response = client.post("/api/codex-runs", headers={"origin": "http://testserver"})
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json(), expected)
+                runner.assert_called_once_with(codex_root)
+                prefix = "/api/runs/" + source["run_id"]
+                self.assertEqual(client.get(prefix).json(), expected)
+                self.assertEqual(client.get(prefix + "/download").content, (codex_root / source["run_id"] / "evidence.json").read_bytes())
+
+                entered, release = Event(), Event()
+
+                def waiting_run(output):
+                    entered.set()
+                    if not release.wait(10):
+                        raise RuntimeError("Fixture execution did not resume")
+                    return source
+
+                runner.side_effect = waiting_run
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    active = pool.submit(client.post, "/api/codex-runs")
+                    try:
+                        self.assertTrue(entered.wait(5))
+                        self.assertEqual(client.post("/api/codex-runs").status_code, 409)
+                    finally:
+                        release.set()
+                    self.assertEqual(active.result(timeout=10).status_code, 200)
+                runner.side_effect = RuntimeError("Explicit unit-fixture failure")
+                self.assertEqual(client.post("/api/codex-runs").status_code, 500)
+                runner.side_effect = None
+                self.assertEqual(client.post("/api/codex-runs").status_code, 200)
 
 
 if __name__ == "__main__":

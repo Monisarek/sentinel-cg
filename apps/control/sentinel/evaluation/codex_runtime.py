@@ -6,8 +6,8 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from apps.control.sentinel.agents.budget import BudgetExceeded
-from apps.control.sentinel.agents.codex import CodexAgentDriver, CodexPolicySynthesizer
-from apps.control.sentinel.agents.codex_subscription import CodexSubscriptionClient
+from apps.control.sentinel.agents.codex import CodexPolicySynthesizer
+from apps.control.sentinel.agents.codex_subscription import CodexSubscriptionClient, CodexSubscriptionDriver
 from apps.control.sentinel.evaluation.meta_runtime import _execute_cycle
 
 
@@ -52,7 +52,7 @@ def run_codex(output_root: Path, *, seed: int = 0):
     budget = CodexSubscriptionBudget()
 
     def driver(model_id, *, budget, role, max_completion_tokens):
-        return CodexAgentDriver(CodexSubscriptionClient("red", budget, budget_role=role))
+        return CodexSubscriptionDriver(CodexSubscriptionClient("red", budget, budget_role=role))
 
     def synthesizer(model_id, *, budget, max_completion_tokens):
         return CodexPolicySynthesizer(CodexSubscriptionClient("blue", budget))

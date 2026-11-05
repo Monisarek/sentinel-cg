@@ -1,8 +1,9 @@
 """Explicit ChatGPT-subscription execution through the official Codex CLI."""
 
 import subprocess
+from copy import deepcopy
 
-from apps.control.sentinel.agents.codex import CodexStructuredClient
+from apps.control.sentinel.agents.codex import CodexStructuredClient, CodexAgentDriver
 from apps.control.sentinel.agents.contracts import ProviderBlocked, ProviderTransportError
 
 
@@ -39,3 +40,10 @@ class CodexSubscriptionClient(CodexStructuredClient):
             raise ProviderTransportError("Codex subscription request exceeded the experiment deadline") from None
         self.budget.remaining_seconds(self.budget_role)
         return result
+
+
+class CodexSubscriptionDriver(CodexAgentDriver):
+    action_schema = deepcopy(CodexAgentDriver.action_schema)
+    action_schema["properties"]["value"]["minimum"] = 1
+    decision_schema = deepcopy(CodexAgentDriver.decision_schema)
+    decision_schema["properties"]["action"]["anyOf"][0] = action_schema

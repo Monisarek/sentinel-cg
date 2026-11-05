@@ -5,11 +5,14 @@ from pathlib import Path
 import re
 import sqlite3
 from contextlib import closing
+from threading import Lock
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
+from apps.control.sentinel.evaluation.codex_runtime import run_codex
 from apps.control.sentinel.policy.versions import PolicyRegistry, digest
 from apps.sandbox.state import SandboxState, state_hash
 from apps.sandbox.state.store import Sandbox
@@ -108,6 +111,15 @@ def create_app(output_root: Path = ROOT / ".cache/core", static_root: Path = ROO
     elif output_root == (ROOT / ".cache/portfolio").resolve():
         roots += [ROOT / ".cache/codex-cycles"]
     app = FastAPI(title="SENTINEL Evidence Workspace", docs_url=None, redoc_url=None)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
+    codex_lock = Lock()
+    codex_root = ROOT / ".cache/codex-cycles"
+
+    def local_request(request):
+        origin = request.headers.get("origin")
+        if ((origin is not None and origin != str(request.base_url).rstrip("/"))
+                or request.headers.get("sec-fetch-site") == "cross-site"):
+            raise HTTPException(403, "Execution requires a same-origin local request")
 
     def locate(run_id):
         if RUN_ID.fullmatch(run_id) is not None:
@@ -124,9 +136,21 @@ def create_app(output_root: Path = ROOT / ".cache/core", static_root: Path = ROO
         return load_evidence(files[-1].parent.parent, files[-1].parent.name)
 
     @app.post("/api/runs")
-    def start_run():
+    def start_run(request: Request):
+        local_request(request)
         result = prove_core(output_root, relative_paths=True)
         return load_evidence(output_root, result["run_id"])
+
+    @app.post("/api/codex-runs")
+    def start_codex_run(request: Request):
+        local_request(request)
+        if not codex_lock.acquire(blocking=False):
+            raise HTTPException(409, "A Codex experiment is already running")
+        try:
+            result = run_codex(codex_root)
+            return load_evidence(codex_root, result["run_id"])
+        finally:
+            codex_lock.release()
 
     @app.get("/api/runs/{run_id}")
     def get_run(run_id: str):

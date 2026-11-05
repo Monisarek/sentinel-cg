@@ -139,10 +139,11 @@ export function Workspace({ bundle, selected, select, recorded }: { bundle: Bund
   </>;
 }
 
-function App() {
+export function App() {
   const [bundle, setBundle] = useState<Bundle | null>(null);
   const [selected, select] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [runMode, setRunMode] = useState<"codex" | "fixture">("codex");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [recorded, setRecorded] = useState(0);
@@ -164,17 +165,17 @@ function App() {
     stream.onerror = () => stream.close();
     return () => stream.close();
   }, [bundle?.run_id]);
-  async function run() {
-    setBusy(true); setError("");
-    try { const data = await readBundle(await fetch("/api/runs", { method: "POST" })); setBundle(data); select(data.original_proposals.length); window.history.replaceState(null, "", `?run_id=${encodeURIComponent(data.run_id)}`); }
-    catch (failure) { setError(failure instanceof Error ? failure.message : "The deterministic proof could not be completed."); }
+  async function run(mode: "codex" | "fixture") {
+    setBusy(true); setRunMode(mode); setError("");
+    try { const data = await readBundle(await fetch(mode === "codex" ? "/api/codex-runs" : "/api/runs", { method: "POST" })); setBundle(data); select(data.original_proposals.length); window.history.replaceState(null, "", `?run_id=${encodeURIComponent(data.run_id)}`); }
+    catch (failure) { setError(failure instanceof Error ? failure.message : "The experiment could not be completed."); }
     finally { setBusy(false); }
   }
   function download() {
     if (!bundle) return;
     const link = document.createElement("a"); link.href = downloadUrl(bundle); link.download = `${bundle.run_id}.json`; link.click();
   }
-  return <><header className="site-header"><a className="brand" href="/" aria-label="SENTINEL Evidence Workspace">SENTINEL<span>Counterexample-Guided Safety for AI Agents</span></a><div className="header-actions"><button className="secondary" onClick={download} disabled={!bundle || busy}>Download JSON</button><button className="primary" onClick={run} disabled={busy}>{busy ? "Executing SQLite proof…" : "Run deterministic proof"}</button></div></header><main><div className="fixture-banner"><span className="fixture-dot" /><strong>{bundle ? sourceLabel(bundle) : "Deterministic proof"}</strong><code>{bundle?.evidence_kind || "deterministic_test_fixture"}</code><span>{bundle ? `${bundle.real_model_call ? "Model calls recorded" : "No real model calls"} · ${bundle.runtime_status}` : "No inference provider is called"}</span></div>{error && <div role="alert" className="notice error">{error}</div>}{bundle && bundle.status !== "PASS" && <div role="alert" className="notice error">Run status: {bundle.status} · {bundle.runtime_status}. These recorded results may be partial; completed stages remain inspectable below.</div>}<div className="activity" role="status" aria-live="polite">{busy ? "Executing isolated SQLite transitions, independent verification, promotion, and counterfactual replay. No inference provider is called." : loading ? "Loading saved evidence…" : ""}</div>{bundle ? <Workspace bundle={bundle} selected={selected} select={select} recorded={recorded} /> : !loading && <div className="empty panel"><span className="eyebrow">Evidence workspace</span><h1>Start with a reproducible proof.</h1><p>Run the deterministic fixture to verify policy rejection, controlled promotion, and two real SQLite futures from the same initial state.</p><button className="primary" onClick={run} disabled={busy}>Run deterministic proof</button><p className="muted">Meta-dependent discovery, repair, and adaptive re-attack remain pending.</p></div>}</main><footer><span>SENTINEL-CG 2.0</span><span>Evidence first. Policy activation follows independent verification.</span></footer></>;
+  return <><header className="site-header"><a className="brand" href="/" aria-label="SENTINEL Evidence Workspace">SENTINEL<span>Counterexample-Guided Safety for AI Agents</span></a><div className="header-actions"><button className="secondary" onClick={download} disabled={!bundle || busy}>Download JSON</button><button className="secondary" onClick={() => run("fixture")} disabled={busy}>{busy && runMode === "fixture" ? "Executing SQLite fixture…" : "Run deterministic fixture"}</button><button className="primary" onClick={() => run("codex")} disabled={busy}>{busy && runMode === "codex" ? "Running Codex experiment…" : "Run Codex experiment"}</button></div></header><main><div className="fixture-banner"><span className="fixture-dot" /><strong>{bundle ? sourceLabel(bundle) : "No experiment loaded"}</strong><code>{bundle?.evidence_kind || "READY"}</code><span>{bundle ? `${bundle.real_model_call ? "Model calls recorded" : "No real model calls"} · ${bundle.runtime_status}` : "Choose an experiment"}</span></div><p className="muted">Codex experiment · gpt-6.1-sol · medium · ChatGPT subscription. Uses the signed-in subscription and consumes its usage limits. The deterministic fixture runs locally.</p>{error && <div role="alert" className="notice error">{error}</div>}{bundle && bundle.status !== "PASS" && <div role="alert" className="notice error">Run status: {bundle.status} · {bundle.runtime_status}. These recorded results may be partial; completed stages remain inspectable below.</div>}<div className="activity" role="status" aria-live="polite">{busy ? runMode === "codex" ? "Codex is proposing actions and a policy patch. The Gateway executes actions and independent verification controls promotion." : "Executing isolated SQLite transitions, independent verification, promotion, and counterfactual replay from a deterministic fixture." : loading ? "Loading saved evidence…" : ""}</div>{bundle ? <Workspace bundle={bundle} selected={selected} select={select} recorded={recorded} /> : !loading && <div className="empty panel"><span className="eyebrow">Evidence workspace</span><h1>Start with a reproducible proof.</h1><p>Run a Codex experiment for model-proposed actions, policy synthesis, independent verification, replay, and a fresh adaptive evaluation. Or inspect a deterministic fixture with handcrafted inputs.</p><button className="primary" onClick={() => run("codex")} disabled={busy}>Run Codex experiment</button><button className="secondary" onClick={() => run("fixture")} disabled={busy}>Run deterministic fixture</button></div>}</main><footer><span>SENTINEL-CG 2.0</span><span>Evidence first. Policy activation follows independent verification.</span></footer></>;
 }
 
 if (typeof document !== "undefined") {

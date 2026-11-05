@@ -20,8 +20,18 @@ registerHooks({
     return nextLoad(url, context);
   },
 });
-const { Workspace } = await import("../src/main.tsx");
+const { App, Workspace } = await import("../src/main.tsx");
 const render = (raw, selected = 1) => renderToStaticMarkup(createElement(Workspace, { bundle: normalizeEvidence(raw), selected, select() {}, recorded: 0 }));
+
+test("the application entrypoint separates the subscription Codex run from the local fixture", () => {
+  const html = renderToStaticMarkup(createElement(App));
+  assert.match(html, /Run Codex experiment/);
+  assert.match(html, /Run deterministic fixture/);
+  assert.match(html, /gpt-6.1-sol · medium · ChatGPT subscription/);
+  assert.match(html, /consumes its usage limits/);
+  assert.match(html, /No experiment loaded/);
+  assert.doesNotMatch(html, /No inference provider is called/);
+});
 
 // Protocol-shaped UI test data only. These objects are never AI evidence.
 const state = (production = 8, staging = 2, version = 0) => ({
