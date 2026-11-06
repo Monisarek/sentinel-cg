@@ -23,7 +23,7 @@ class ResourceLimit(ProviderError):
 
 
 class _WindowsJob:
-    def __init__(self, timeout, process_memory_bytes, job_memory_bytes, max_processes):
+    def __init__(self, cpu_seconds, process_memory_bytes, job_memory_bytes, max_processes):
         import ctypes
         from ctypes import wintypes
 
@@ -65,7 +65,7 @@ class _WindowsJob:
         # Active-process, aggregate CPU, per-process/job memory, and kill-on-close limits.
         limits.basic.flags = 0x8 | 0x4 | 0x100 | 0x200 | 0x2000
         limits.basic.active_processes = max_processes
-        limits.basic.job_time = math.ceil(timeout) * 10_000_000
+        limits.basic.job_time = cpu_seconds * 10_000_000
         limits.process_memory = process_memory_bytes
         limits.job_memory = job_memory_bytes
         if not self.kernel.SetInformationJobObject(self.handle, 9, ctypes.byref(limits), ctypes.sizeof(limits)):
@@ -138,6 +138,7 @@ def bounded_run(command, *, input=None, cwd=None, env=None, timeout,
                 check_cancel=None, max_output_bytes=MAX_OUTPUT_BYTES,
                 max_input_bytes=MAX_INPUT_BYTES, process_memory_bytes=PROCESS_MEMORY_BYTES,
                 job_memory_bytes=JOB_MEMORY_BYTES, max_processes=MAX_CHILD_PROCESSES,
+                max_cpu_seconds=None,
                 capture_output=True, text=True, encoding="utf-8", errors="strict",
                 creationflags=0):
     """Capture bounded output and terminate the process tree on every exit path."""
@@ -146,6 +147,9 @@ def bounded_run(command, *, input=None, cwd=None, env=None, timeout,
         raise ValueError("child command must be an argument list")
     if type(timeout) not in (int, float) or not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("child timeout must be finite and positive")
+    cpu_seconds = math.ceil(timeout) if max_cpu_seconds is None else max_cpu_seconds
+    if type(cpu_seconds) is not int or not 1 <= cpu_seconds <= math.ceil(timeout):
+        raise ValueError("child CPU limit must be a positive integer within the wall-clock ceiling")
     for limit in (max_output_bytes, max_input_bytes, process_memory_bytes, job_memory_bytes, max_processes):
         if type(limit) is not int or limit <= 0:
             raise ValueError("child resource limits must be positive integers")
@@ -198,7 +202,7 @@ def bounded_run(command, *, input=None, cwd=None, env=None, timeout,
 
     try:
         if os.name == "nt":
-            job = _WindowsJob(timeout, process_memory_bytes, job_memory_bytes, max_processes)
+            job = _WindowsJob(cpu_seconds, process_memory_bytes, job_memory_bytes, max_processes)
             flags = creationflags | subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP | 0x4
             options = {"creationflags": flags}
             arguments = command
@@ -206,7 +210,7 @@ def bounded_run(command, *, input=None, cwd=None, env=None, timeout,
             # The POSIX group cleans up descendants; it is not a hostile-code containment boundary.
             options = {"start_new_session": True}
             arguments = [sys.executable, "-B", "-c", _POSIX_LIMITER,
-                         str(process_memory_bytes), str(math.ceil(timeout)), *command]
+                         str(process_memory_bytes), str(cpu_seconds), *command]
         process = subprocess.Popen(arguments, cwd=cwd, env=env, stdin=subprocess.PIPE,
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, close_fds=True, **options)
         for stream, buffer in zip((process.stdout, process.stderr), buffers):

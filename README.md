@@ -16,7 +16,8 @@ handcrafted fixture can be inspected without subscription access.
 [Portfolio case study](docs/PORTFOLIO.md) ·
 [Architecture and trust boundaries](docs/PORTFOLIO.md#architecture-and-trust-boundaries) ·
 [Verify the evidence](docs/VERIFY_EVIDENCE.md) ·
-[Production-readiness gates and limitations](docs/PRODUCTION_READINESS.md)
+[Production-readiness gates and limitations](docs/PRODUCTION_READINESS.md) ·
+[Recorded technical walkthrough](docs/DEMO.md#recorded-codex-portfolio-walkthrough)
 
 ![Codex experiment showing production at 7 under v0 and 8 under verified v1](docs/images/codex-experiment.png)
 
@@ -42,10 +43,14 @@ existing ChatGPT plan using `codex login`. `codex login status` must report
 ChatGPT authentication. The subscription path rejects API-key authentication
 and consumes the plan's usage allowance.
 
+For review without inference, use the [saved evidence instructions](docs/VERIFY_EVIDENCE.md)
+and start the server with `--read-only`. New inference is opt-in and requires an
+explicitly approved run. Hardening tests and saved-result viewing never call a model.
+
 Run the workspace from a PowerShell terminal:
 
 ```powershell
-git clone --branch build https://github.com/Monisarek/sentinel-cg.git
+git clone --branch codex/production-hardening https://github.com/Monisarek/sentinel-cg.git
 cd sentinel-cg
 powershell -NoProfile -ExecutionPolicy Bypass -File .\start-demo.ps1
 ```
@@ -55,6 +60,9 @@ dependencies from the Python and npm registries when needed, builds the frontend
 and serves it on loopback. Stop it with Ctrl+C. If the default port is busy,
 append `-Port 8001` and open <http://127.0.0.1:8001>. Registry access is needed
 for an uncached first install.
+
+These instructions target the hardening review branch, based on PR #2. No final
+release or merge into `main` is implied.
 
 On Linux or macOS, use the same prerequisites and run from the repository root:
 
@@ -88,6 +96,11 @@ The fixture's action trace and patch are explicitly labeled in the workspace.
 
 ## Engineering decisions
 
+- **Execution has a durable lifecycle.** Local processes share a kernel lock and
+  a SQLite execution journal. An `Idempotency-Key` binds a request to its first
+  attempt, including failures; restart recovery marks unfinished work inconclusive.
+  Model subprocesses have resource limits and cancellation. This does not provide
+  separate OS identity, filesystem, or network isolation.
 - **Preview and commit use the same deterministic transition.** The Gateway
   validates typed actions against trusted task scope and policy. Preview and
   atomic commit are tied to the current SQLite version. A DENY leaves the
@@ -144,6 +157,7 @@ npm --prefix apps/web run build
 python -m scripts.eval_random
 python -m scripts.eval_shield
 python -m scripts.eval_parametric
+python -B -m scripts.eval_topologies
 ```
 
 The earlier offline acceptance run at `913231e` passed 222 Python tests,
@@ -157,6 +171,20 @@ cases and preserved 20/20 required workflows. The parameter sweep blocked 100/10
 unsafe cases and preserved 500/500 required workflows across the same topology.
 Run identifiers, source provenance, denominators, and limitations are in the
 [evaluation report](docs/EVALUATION.md). [Remediation audit](docs/AUDIT.md)
+
+The structural evaluation extension covers shared capacity, shared schema
+compatibility, and delayed maintenance across services. The latter two are
+deterministic evaluation-only worlds. They do not establish new model-driven
+discoveries or extend the original live Gateway. All attempts and explicit
+measurement limits are retained; no model-versus-random superiority is claimed.
+
+Hardening validation passed 290 Python tests, 24 frontend tests, the language
+guard and production build. The independently verified structural run retains
+230 attempts from clean source `7285489`: v0 random discovery was 19/20, 14/20
+and 10/20 across the three worlds. Repaired/shielded trials observed no violations
+within those budgets and preserved the declared utility workflows. Read the
+[measurements and uncertainty](docs/EVALUATION.md#recorded-structural-evaluation)
+and [portable collection](evals/evidence/structural-evaluation-evidence.zip).
 
 ## Scope and provenance
 

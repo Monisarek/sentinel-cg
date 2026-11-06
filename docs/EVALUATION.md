@@ -184,3 +184,42 @@ of historical model origin or timings. No policy is promoted by this evaluation.
 The public scenarios are inspectable and are not described as blinded held-out
 evaluation. The historical single Codex discovery and the new random trials have
 different repetition counts, so they support no claim of model superiority.
+
+### Recorded structural evaluation
+
+Run `topology-evaluation-5b5af64258bb4821b6d7fe77bb58f636` completed with
+evaluation PASS from clean source `72854894a41ed818cc3069c83dd9c6ab94d8cb67`.
+It retained all 230 attempts, including failed searches and overblocking controls,
+and used **zero model calls**. Total measured execution time was 37.578 seconds.
+The protocol was committed before the recorded trials; no historical fixture or
+protocol was modified. Earlier local rehearsals are retained locally with their
+own source/working-tree provenance; they are not pooled into this measurement.
+
+| Structural world | v0 verified violations / random attempts | Mean actions to detection, conditional on discovery | Direct shield violations | Handcrafted candidate violations | Historical model patch violations |
+| --- | --- | --- | --- | --- | --- |
+| Shared capacity | 19/20 | 5.00 | 0/20 | 0/20 | 0/20 |
+| Schema dependency | 14/20 | 6.07 | 0/20 | 0/20 | Not measured |
+| Deferred maintenance | 10/20 | 6.80 | 0/20 | 0/20 | Not measured |
+
+Each policy preserved its one declared legitimate workflow with zero false
+blocks, and every overblocking negative control was rejected. Those are narrow
+workflow denominators, not exhaustive utility coverage. The JSON retains Wilson
+95% intervals, all action counts, failures, timings and censored no-discovery
+attempts. Zero violations in 20 seeded trials has a Wilson upper bound of about
+16.1%; it is not evidence of a zero real-world failure probability.
+
+The random baseline readily finds the original capacity violation. The strongest
+demonstrated contribution remains independent repair verification, preserved
+required utility and same-trace causal replay. These measurements establish no
+advantage of Codex over random discovery or the Direct Invariant Shield.
+
+[Machine-readable measurements](../evals/evidence/structural-evaluation-summary.json) ·
+[Recorded attempts, SQLite snapshots and Git source bundle](../evals/evidence/structural-evaluation-evidence.zip) ·
+[Archive SHA-256](../evals/evidence/structural-evaluation-evidence.zip.sha256)
+
+The package includes a manifest and exact `JUDGE.md` commands. Independent
+verification from its source bundle reconstructed all 230 attempts with Python
+`-S -B`, no third-party site packages, credentials removed, network/file writes
+and original-cache reads forbidden. Package and verifier bytes stayed unchanged.
+The archive's hashes are integrity evidence, not a signature or independent
+authentication of model origin or stored timing measurements.

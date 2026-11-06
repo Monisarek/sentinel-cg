@@ -16,6 +16,13 @@ async function readBundle(response: Response): Promise<Bundle> {
   return normalizeEvidence(await response.json());
 }
 
+export async function requestExperiment(mode: "codex" | "fixture", keys: Partial<Record<"codex" | "fixture", string>>): Promise<Bundle> {
+  const key = keys[mode] ??= crypto.randomUUID();
+  const data = await readBundle(await fetch(mode === "codex" ? "/api/codex-runs" : "/api/runs", { method: "POST", headers: { "Idempotency-Key": key } }));
+  delete keys[mode];
+  return data;
+}
+
 function Status({ pass, children }: { pass: boolean; children: ReactNode }) {
   return <span className={`status ${pass ? "pass" : "fail"}`}>{children}</span>;
 }
@@ -168,8 +175,7 @@ export function App() {
   }, [bundle?.run_id]);
   async function run(mode: "codex" | "fixture") {
     setBusy(true); setRunMode(mode); setError("");
-    const key = requestKeys.current[mode] ??= crypto.randomUUID();
-    try { const response = await fetch(mode === "codex" ? "/api/codex-runs" : "/api/runs", { method: "POST", headers: { "Idempotency-Key": key } }); if (response.status < 500 && response.status !== 409) delete requestKeys.current[mode]; const data = await readBundle(response); setBundle(data); select(data.original_proposals.length); window.history.replaceState(null, "", `?run_id=${encodeURIComponent(data.run_id)}`); }
+    try { const data = await requestExperiment(mode, requestKeys.current); setBundle(data); select(data.original_proposals.length); window.history.replaceState(null, "", `?run_id=${encodeURIComponent(data.run_id)}`); }
     catch (failure) { setError(failure instanceof Error ? failure.message : "The experiment could not be completed."); }
     finally { setBusy(false); }
   }

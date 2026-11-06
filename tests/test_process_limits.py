@@ -93,6 +93,15 @@ class ProcessLimitTests(unittest.TestCase):
         self.assertTrue(marker.is_file())
         self.assert_dead(int(marker.read_text()))
 
+    def test_cpu_limit_terminates_busy_child_before_wall_clock_deadline(self):
+        started = time.monotonic()
+        result = self.execute("while True: pass", timeout=15, max_cpu_seconds=1)
+        if os.name == "nt":
+            self.assertEqual(result.returncode, 0xC0000044)  # STATUS_QUOTA_EXCEEDED
+        else:
+            self.assertLess(result.returncode, 0)
+        self.assertLess(time.monotonic() - started, 15)
+
     def test_cancellation_terminates_child_and_grandchild(self):
         marker = self.root / "descendant.pid"
 
@@ -157,7 +166,9 @@ class ProcessLimitTests(unittest.TestCase):
         self.assertFalse(marker.exists())
 
     def test_invalid_resource_settings_fail_before_process_creation(self):
-        for options in ({"timeout": 0}, {"timeout": float("nan")}, {"max_output_bytes": True}, {"max_processes": 0}):
+        for options in ({"timeout": 0}, {"timeout": float("nan")}, {"max_output_bytes": True},
+                        {"max_processes": 0}, {"max_cpu_seconds": True}, {"max_cpu_seconds": 0},
+                        {"max_cpu_seconds": 11}):
             with self.subTest(options=options), self.assertRaises(ValueError):
                 self.execute("pass", **options)
 
