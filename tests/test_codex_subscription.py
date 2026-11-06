@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from apps.control.sentinel.agents.codex_subscription import CodexSubscriptionClient, CodexSubscriptionDriver
-from apps.control.sentinel.agents.contracts import DECISION_SCHEMA, ProviderBlocked
+from apps.control.sentinel.agents.contracts import DECISION_SCHEMA, ProviderBlocked, ProviderTransportError
 from apps.control.sentinel.agents.budget import BudgetExceeded
 from apps.control.sentinel.evaluation.codex_runtime import CodexSubscriptionBudget
 from tests.test_codex_provider import CliFixture
@@ -45,6 +45,7 @@ class SubscriptionTests(unittest.TestCase):
         self.assertEqual(budget.calls["red"], 0)
         self.assertEqual(metadata["reasoning_effort"], "medium")
         self.assertEqual(metadata["model_id"], "gpt-6.1-sol")
+        self.assertNotIn("response_id", metadata)
         self.assertEqual(client.diagnostics[0]["request"]["prompt"], "Explicit unit fixture.")
 
     def test_stage_call_and_wall_clock_limits_fail_closed(self):
@@ -73,6 +74,24 @@ class SubscriptionTests(unittest.TestCase):
         self.assertNotIn("minimum", CodexAgentDriver.action_schema["properties"]["value"])
         self.assertEqual(CodexSubscriptionDriver.decision_schema["properties"]["action"]["anyOf"][0],
                          CodexSubscriptionDriver.action_schema)
+
+    def test_startup_failure_retains_sanitized_diagnostics_without_retry(self):
+        budget = CodexSubscriptionBudget()
+        budget.begin_stage("red")
+        client = CodexSubscriptionClient("red", budget)
+        secret = "sk-" + "x" * 40
+        replies = [
+            subprocess.CompletedProcess([], 0, stdout="Logged in using ChatGPT", stderr=""),
+            subprocess.CompletedProcess([], 1, stdout="", stderr="Startup failed: " + secret),
+        ]
+        with patch("apps.control.sentinel.agents.codex_subscription.subprocess.run", side_effect=replies) as process:
+            with self.assertRaises(ProviderTransportError):
+                client.complete("Explicit unit fixture.", DECISION_SCHEMA)
+        self.assertEqual(process.call_count, 2)
+        self.assertEqual(budget.calls["red"], 1)
+        self.assertEqual(client.calls, [])
+        self.assertNotIn(secret, str(client.diagnostics))
+        self.assertEqual(client.diagnostics[-1]["error_category"], "CLI_EXECUTION_ERROR")
 
 
 if __name__ == "__main__":

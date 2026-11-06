@@ -1,5 +1,38 @@
 # Verify a portable Evidence Bundle
 
+## Recorded Codex experiment
+
+The [Codex collection](../evals/evidence/codex-subscription-evidence.zip) includes
+the completed model-driven cycle and both earlier unsuccessful attempts.
+Check its [SHA-256](../evals/evidence/codex-subscription-evidence.zip.sha256).
+The [summary](../evals/evidence/codex-subscription-summary.json) records each
+attempt's source, outcome, call count, and manifest hash. Each package retains
+its original JSON, reports, policy registry, and SQLite snapshots.
+Codex provenance identifies CLI sessions. In these recorded attempts the legacy
+`response_id` field aliases the same `session_id`; the workspace labels it as a
+session identifier.
+
+To view the saved result without calling a model, extract the collection from
+the repository root and use the existing built workspace:
+
+```powershell
+Expand-Archive .\evals\evidence\codex-subscription-evidence.zip .\.cache\codex-recorded
+.\.venv\Scripts\python.exe -m scripts.serve_evidence --output-dir .cache/codex-recorded/codex-subscription-proof/recorded-runs
+```
+
+Open <http://127.0.0.1:8000/?run_id=codex-cycle-59163c43b68a4304b261f000b2406c96>.
+Use an unused extraction folder. Starting a new experiment with the Codex button
+consumes subscription usage. Opening the recorded result and downloading its
+original JSON use saved local data.
+
+The collection's `JUDGE.md` gives exact independent verification commands.
+Clone its `verified-cycle/source.bundle`, select verifier commit
+`901ce3bb0957769270ab530993436454cf616398`, and run the commands below for
+each package. All three packages passed a separate Python `-S -B` verification
+with network, writes, and original-cache reads forbidden.
+
+## Package verification
+
 This package contains the original, unchanged JSON Evidence Bundle, recorded
 traces and verification reports, policy records, final SQLite snapshots, and a
 self-contained Git source bundle. It does not contain API keys, authorization

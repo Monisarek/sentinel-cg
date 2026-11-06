@@ -103,8 +103,9 @@ def _validate_calls(calls, fixture, provider="meta"):
         if (provenance.get("provider") != provider or not provenance.get("model_id")
                 or provenance.get("real_model_call") is not (not fixture)):
             raise InferenceSchemaError("Inference provenance does not match this run's declared evidence kind")
-        if not fixture and (not provenance.get("response_id") or not provenance.get("prompt_hash")):
-            raise InferenceSchemaError("Live evidence requires actual response IDs and prompt hashes")
+        identifier = provenance.get("session_id") if provider == "codex" else provenance.get("response_id")
+        if not fixture and (not identifier or not provenance.get("prompt_hash")):
+            raise InferenceSchemaError("Live evidence requires provider identifiers and prompt hashes")
 
 
 def _execute_cycle(directory: Path, budget: RuntimeBudget, models: dict, seed: int, *,

@@ -205,6 +205,12 @@ class EvidenceAPITests(unittest.TestCase):
                 runner.side_effect = None
                 self.assertEqual(client.post("/api/codex-runs").status_code, 200)
 
+            with TestClient(create_app(codex_root, root / "missing-dist")) as client, \
+                 patch("apps.control.sentinel.api.app.run_codex", return_value=source) as runner:
+                self.assertEqual(client.post("/api/codex-runs").status_code, 200)
+                runner.assert_called_once_with(codex_root.resolve())
+                self.assertEqual(client.get("/api/runs/" + source["run_id"]).status_code, 200)
+
 
 if __name__ == "__main__":
     unittest.main()

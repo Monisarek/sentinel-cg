@@ -112,7 +112,7 @@ class CodexStructuredClient:
                 "requested_model_id": self.model_id, "model_id_source": "explicit CLI configuration",
                 "model_id_service_confirmed": False,
                 "real_model_call": True, "role": self.role, "session_id": sessions[-1],
-                "response_id": sessions[-1], "reasoning_effort": "medium",
+                "reasoning_effort": "medium",
                 "usage": completed[-1].get("usage"), "latency_seconds": time.monotonic() - started,
                 "prompt_hash": sha256(prompt.encode("utf-8")).hexdigest(), "isolation": ISOLATION,
             }

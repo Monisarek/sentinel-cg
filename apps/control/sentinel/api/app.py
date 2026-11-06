@@ -113,7 +113,9 @@ def create_app(output_root: Path = ROOT / ".cache/core", static_root: Path = ROO
     app = FastAPI(title="SENTINEL Evidence Workspace", docs_url=None, redoc_url=None)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
     codex_lock = Lock()
-    codex_root = ROOT / ".cache/codex-cycles"
+    codex_root = ROOT / ".cache/codex-cycles" if output_root in {
+        (ROOT / ".cache/core").resolve(), (ROOT / ".cache/portfolio").resolve()
+    } else output_root
 
     def local_request(request):
         origin = request.headers.get("origin")
