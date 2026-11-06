@@ -103,7 +103,7 @@ def load_evidence(output_root: Path, run_id: str) -> dict:
         raise HTTPException(409, "Evidence integrity verification failed") from None
 
 
-def create_app(output_root: Path = ROOT / ".cache/core", static_root: Path = ROOT / "apps/web/dist") -> FastAPI:
+def create_app(output_root: Path = ROOT / ".cache/core", static_root: Path = ROOT / "apps/web/dist", *, read_only: bool = False) -> FastAPI:
     output_root = Path(output_root).resolve()
     roots = [output_root]
     if output_root == (ROOT / ".cache/core").resolve():
@@ -116,6 +116,10 @@ def create_app(output_root: Path = ROOT / ".cache/core", static_root: Path = ROO
     codex_root = ROOT / ".cache/codex-cycles" if output_root in {
         (ROOT / ".cache/core").resolve(), (ROOT / ".cache/portfolio").resolve()
     } else output_root
+
+    def ensure_writable():
+        if read_only:
+            raise HTTPException(403, "Read-only evidence mode: execution is disabled")
 
     def local_request(request):
         origin = request.headers.get("origin")
@@ -139,12 +143,14 @@ def create_app(output_root: Path = ROOT / ".cache/core", static_root: Path = ROO
 
     @app.post("/api/runs")
     def start_run(request: Request):
+        ensure_writable()
         local_request(request)
         result = prove_core(output_root, relative_paths=True)
         return load_evidence(output_root, result["run_id"])
 
     @app.post("/api/codex-runs")
     def start_codex_run(request: Request):
+        ensure_writable()
         local_request(request)
         if not codex_lock.acquire(blocking=False):
             raise HTTPException(409, "A Codex experiment is already running")
