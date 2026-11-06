@@ -22,7 +22,7 @@ This file defines the release boundary for a **public engineering portfolio**. A
 
 | Gate | Required acceptance evidence | Current assessment |
 | --- | --- | --- |
-| R0: continuous validation | Green GitHub Actions checks on a clean candidate commit: Python tests, frontend tests, TypeScript build and public-source check. No model login or paid API is needed. | Baseline PR #2: all five jobs PASS at `11aa06e`, workflow run `42230855539`. Candidate results are recorded below after validation. |
+| R0: continuous validation | Green GitHub Actions checks on a clean candidate commit: Python tests, frontend tests, TypeScript build and public-source check. No model login or paid API is needed. | **PASS** at `18aad82`: all five jobs, Windows/Linux with Python 3.10/3.12 and frontend, workflow `42269346164`. A final release still requires green checks on its exact HEAD. |
 | R1: execution boundary | Local execution endpoints remain loopback-only. Read-only mode cannot invoke model calls or mutate sandbox state. No public runner exposure without authentication, authorization and CSRF review. | Local-only boundary with read-only switch; production identity/access controls NOT IMPLEMENTED |
 | R2: provenance | Clean source, pinned verifier, offline portable bundle, independent verifier output, and publication of a trusted checksum or signed attestation via a separate trusted channel. | Offline integrity is implemented; external authenticity/attestation NOT ESTABLISHED |
 | R3: adversarial validity | Multiple independently chosen scenarios, varied topologies, genuinely held-out tests, preserved failures, explicit false-positive/false-negative and utility metrics, baseline comparisons. No overclaim from one successful cycle. | Three structural deterministic worlds and independent verifier implemented. Only original shared capacity has a recorded model run. Model-driven cross-topology generalization and independently blinded evaluation NOT ESTABLISHED. |
@@ -169,6 +169,17 @@ permissions passed. No platform or check was removed. Independent reviewers
 also ran 29 portable-evidence tests and 12 topology tests successfully. These
 are offline unit/integration/recorded-evidence checks, not real-inference or
 production deployment acceptance.
+
+[GitHub Actions run `42269346164`](https://github.com/Monisarek/sentinel-cg/actions/runs/42269346164)
+passed all five jobs at `18aad82a7f092182af62719b330ad60ffe687d99`.
+Each Windows configuration passed 290 tests; Linux ran the same suite with four
+Windows-Job-specific tests explicitly skipped, while POSIX supervision and
+cross-process tests passed. Frontend passed all 24 tests and the production build.
+The first candidate run exposed a Linux test synchronization lifetime bug:
+an inline Event was garbage-collected before a spawned child rebuilt its POSIX
+semaphore. Keeping the parent reference until child completion fixed it. No OS,
+Python version, test or acceptance criterion was removed. The failed run remains
+[visible](https://github.com/Monisarek/sentinel-cg/actions/runs/42268950129).
 
 From the repository root, with Python dependencies installed:
 
