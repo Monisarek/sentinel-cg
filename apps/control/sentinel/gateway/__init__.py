@@ -4,6 +4,7 @@ from copy import deepcopy
 from dataclasses import asdict
 from hashlib import sha256
 import json
+import time
 from typing import Callable
 
 from apps.control.sentinel.oracles import evaluate_execution, evaluate_safety, evaluate_utility
@@ -12,6 +13,9 @@ from apps.sandbox.preview import PreviewResult, impact_facts, preview_action, st
 from apps.sandbox.state import TaskContract, observed_state, state_hash
 from apps.sandbox.state.store import Sandbox, StateVersionMismatch
 from apps.sandbox.transitions import READ_ONLY_TOOLS, parse_action
+
+
+MAX_PROPOSAL_BYTES = 16 * 1024
 
 
 class _Denied(Exception):
@@ -34,6 +38,7 @@ class Gateway:
 
     def execute(self, proposal: dict, *, expected_state_version: int | None = None, check_budget=None) -> dict:
         """Validate, preview, authorize and commit under one SQLite write lock."""
+        started = time.monotonic()
         action = preview = before = after = None
         decision, outcome, reason = "DENY", "DENIED", "invalid_action"
         error_type = None
@@ -42,9 +47,12 @@ class Gateway:
         request_record = {"proposal": None, "expected_state_version": None}
         # No task, policy or approval context is accepted from the action payload.
         try:
-            request_record = json.loads(json.dumps({
+            encoded_request = json.dumps({
                 "proposal": proposal, "expected_state_version": expected_state_version,
-            }, allow_nan=False))
+            }, allow_nan=False)
+            if len(encoded_request.encode("utf-8")) > MAX_PROPOSAL_BYTES:
+                raise ValueError("tool proposal exceeds the input limit")
+            request_record = json.loads(encoded_request)
             if type(proposal) is not dict:
                 raise ValueError("tool proposal must be an object")
             action = parse_action(request_record["proposal"])
@@ -158,6 +166,7 @@ class Gateway:
             "utility": asdict(evaluate_utility(after, self._task)) if after is not None else None,
         }
         event = json.loads(json.dumps(event, allow_nan=False))
+        event["duration_seconds"] = max(0.0, time.monotonic() - started)
         event["event_hash"] = sha256(json.dumps(event, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
         self.events.append(deepcopy(event))
         return event

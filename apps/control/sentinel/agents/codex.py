@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import stat
 from tempfile import TemporaryDirectory
 import time
 
@@ -14,6 +15,7 @@ from apps.control.sentinel.agents.contracts import (
     ACTION_SCHEMA, DECISION_SCHEMA, AgentContext, AgentDecision, ToolObservation, parse_decision,
     InferenceSchemaError, ProviderBlocked, ProviderError, ProviderTransportError,
 )
+from apps.control.sentinel.agents.process import ResourceLimit, MAX_OUTPUT_BYTES
 
 
 DISABLED_FEATURES = (
@@ -76,6 +78,8 @@ class CodexStructuredClient:
             except (OSError, UnicodeError) as error:
                 raise ProviderTransportError("Codex process execution failed") from error
             try:
+                if len(result.stdout.encode("utf-8")) + len(result.stderr.encode("utf-8")) > MAX_OUTPUT_BYTES:
+                    raise ResourceLimit("Codex event output exceeds the resource limit")
                 events = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
                 if not all(type(event) is dict for event in events):
                     raise ValueError("invalid event shape")
@@ -84,13 +88,14 @@ class CodexStructuredClient:
                 items = [event["item"] for event in events if "item" in event]
                 if not all(type(item) is dict for item in items):
                     raise ValueError("invalid item shape")
+                reported_errors = json.dumps([event.get("message") or event.get("error") for event in events
+                                               if event.get("type") in ("error", "turn.failed")]).lower()
                 self.diagnostics.append({
                     "return_code": result.returncode,
                     "event_types": [event.get("type") for event in events],
                     "item_types": [item.get("type") for item in items],
-                    "reported_errors": [event.get("message") or event.get("error") for event in events if event.get("type") in ("error", "turn.failed")],
+                    "reported_errors": ["Provider error details omitted; no retry was attempted"] if reported_errors != "[]" else [],
                 })
-                reported_errors = json.dumps(self.diagnostics[-1]["reported_errors"]).lower()
                 if "flagged for possible cybersecurity risk" in reported_errors:
                     raise ProviderBlocked("Codex service rejected the request: cybersecurity access is required; no retry was attempted")
                 if "usage limit" in reported_errors or "quota exceeded" in reported_errors:
@@ -99,7 +104,15 @@ class CodexStructuredClient:
                     raise InferenceSchemaError("Codex attempted to use a native tool")
                 if result.returncode or not completed or not sessions or not answer_path.is_file():
                     raise ProviderError("Codex did not complete a structured inference call")
-                data = json.loads(answer_path.read_text(encoding="utf-8"))
+                answer_stat = answer_path.lstat()
+                if (not stat.S_ISREG(answer_stat.st_mode) or getattr(answer_stat, "st_file_attributes", 0) & 0x400
+                        or answer_stat.st_size > MAX_OUTPUT_BYTES):
+                    raise ResourceLimit("Codex structured answer exceeds the regular-file resource limit")
+                with answer_path.open("rb") as answer:
+                    content = answer.read(MAX_OUTPUT_BYTES + 1)
+                if len(content) > MAX_OUTPUT_BYTES:
+                    raise ResourceLimit("Codex structured answer exceeds the resource limit")
+                data = json.loads(content)
                 if type(data) is not dict:
                     raise ValueError("structured response must be an object")
                 usage = completed[-1].get("usage")

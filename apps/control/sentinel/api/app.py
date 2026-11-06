@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 import sqlite3
 from contextlib import closing
-from threading import Lock
+from itertools import islice
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
@@ -13,6 +13,8 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from apps.control.sentinel.evaluation.codex_runtime import run_codex
+from apps.control.sentinel.evaluation.lifecycle import ExecutionStore, ExecutionConflict, ExecutionCapacity, ExecutionCancelled
+from apps.control.sentinel.evidence.portable import _inventory, _json, _path
 from apps.control.sentinel.policy.versions import PolicyRegistry, digest
 from apps.sandbox.state import SandboxState, state_hash
 from apps.sandbox.state.store import Sandbox
@@ -43,7 +45,9 @@ def load_evidence(output_root: Path, run_id: str) -> dict:
     if directory.parent != output_root.resolve():
         raise HTTPException(404, "Unknown evidence run")
     try:
-        data = json.loads((directory / "evidence.json").read_text(encoding="utf-8"))
+        _path(output_root.resolve(), run_id + "/evidence.json")
+        _inventory(directory)
+        data = _json(directory / "evidence.json")
         if data["run_id"] != run_id or digest({key: value for key, value in data.items() if key != "bundle_hash"}) != data["bundle_hash"]:
             raise ValueError("bundle hash mismatch")
         if data["evidence_kind"] not in {"deterministic_test_fixture", "genuine_live_provider_run", "meta_runtime_attempt", "codex_runtime_attempt"}:
@@ -60,7 +64,7 @@ def load_evidence(output_root: Path, run_id: str) -> dict:
                 raise ValueError("Codex evidence cannot establish competition gates")
             verification = data["stages"].get("verification")
             if verification and verification.get("verification_hash"):
-                report = json.loads((directory / "verification/evidence.json").read_text(encoding="utf-8"))
+                report = _json(directory / "verification/evidence.json")
                 if digest(report) != verification["verification_hash"] or report != verification["evaluation"]:
                     raise ValueError("verification artifact hash mismatch")
                 if verification.get("promoted"):
@@ -86,11 +90,12 @@ def load_evidence(output_root: Path, run_id: str) -> dict:
         for name, field in (("negative-control", "negative_control"), ("candidate-verification", "candidate")):
             receipt = data[field]["receipt"]
             if receipt["verification_hash"] is not None:
-                report = json.loads((directory / name / "evidence.json").read_text(encoding="utf-8"))
+                report = _json(directory / name / "evidence.json")
                 if digest(report) != receipt["verification_hash"]:
                     raise ValueError("verification artifact hash mismatch")
         if data["candidate"]["receipt"]["promoted"]:
-            current = PolicyRegistry(directory / "policies.sqlite3").active
+            with closing(sqlite3.connect((directory / "policies.sqlite3").as_uri() + "?mode=ro&immutable=1", uri=True)) as db:
+                current = PolicyRegistry(directory / "policies.sqlite3")._version(db)
             if current.policy_hash != data["candidate"]["receipt"]["policy_hash"]:
                 raise ValueError("active policy hash mismatch")
             if _snapshot_hash(directory / "safe-repair.sqlite3") != data["safe_repair_after_promotion"]["final_state_hash"]:
@@ -112,10 +117,15 @@ def create_app(output_root: Path = ROOT / ".cache/core", static_root: Path = ROO
         roots += [ROOT / ".cache/codex-cycles"]
     app = FastAPI(title="SENTINEL Evidence Workspace", docs_url=None, redoc_url=None)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "testserver"])
-    codex_lock = Lock()
     codex_root = ROOT / ".cache/codex-cycles" if output_root in {
         (ROOT / ".cache/core").resolve(), (ROOT / ".cache/portfolio").resolve()
     } else output_root
+    store = ExecutionStore(codex_root)
+    if not read_only and store.path.is_file():
+        try:
+            store.recover()
+        except ExecutionConflict:
+            pass  # Another worker still owns the kernel lock; its state remains RUNNING.
 
     def ensure_writable():
         if read_only:
@@ -126,6 +136,30 @@ def create_app(output_root: Path = ROOT / ".cache/core", static_root: Path = ROO
         if ((origin is not None and origin != str(request.base_url).rstrip("/"))
                 or request.headers.get("sec-fetch-site") == "cross-site"):
             raise HTTPException(403, "Execution requires a same-origin local request")
+        if request.client and request.client.host not in {"127.0.0.1", "::1", "testclient"}:
+            raise HTTPException(403, "Execution requires a loopback client")
+
+    def execute(request, kind):
+        ensure_writable()
+        local_request(request)
+        key = request.headers.get("idempotency-key")
+        try:
+            if kind == "codex-cycle":
+                result = run_codex(codex_root, idempotency_key=key)
+                return load_evidence(codex_root, result["run_id"])
+            record = store.run(kind, lambda run_id, control: prove_core(output_root, relative_paths=True, run_id=run_id),
+                               idempotency_key=key)
+            if record["state"] != "COMPLETED":
+                raise ExecutionConflict("Original execution did not complete; inspect its persisted status")
+            return load_evidence(output_root, record["run_id"])
+        except ExecutionConflict as error:
+            raise HTTPException(409, str(error)) from None
+        except ExecutionCancelled:
+            raise HTTPException(409, "Execution was cancelled; no retry was started") from None
+        except ExecutionCapacity as error:
+            raise HTTPException(503, str(error)) from None
+        except ValueError:
+            raise HTTPException(422, "Execution request validation failed") from None
 
     def locate(run_id):
         if RUN_ID.fullmatch(run_id) is not None:
@@ -134,46 +168,62 @@ def create_app(output_root: Path = ROOT / ".cache/core", static_root: Path = ROO
                     return root
         raise HTTPException(404, "Unknown evidence run")
 
+    def checked_load(root, run_id):
+        data = load_evidence(root, run_id)
+        record = store.get(run_id)
+        if record and record["state"] != "COMPLETED" and data.get("status") == "PASS":
+            raise HTTPException(409, "Execution lifecycle does not confirm a completed result")
+        return data
+
     @app.get("/api/evidence")
     def latest():
-        files = sorted((path for root in roots for path in root.glob("*/evidence.json") if RUN_ID.fullmatch(path.parent.name)), key=lambda path: path.stat().st_mtime_ns)
+        files = list(islice((path for root in roots for path in root.glob("*/evidence.json") if RUN_ID.fullmatch(path.parent.name)), 10001))
+        if len(files) > 10000:
+            raise HTTPException(409, "Evidence index exceeds the run-count limit; select a run explicitly")
+        files.sort(key=lambda path: path.stat().st_mtime_ns)
         if not files:
             raise HTTPException(404, "No evidence yet. Run the deterministic proof.")
-        return load_evidence(files[-1].parent.parent, files[-1].parent.name)
+        return checked_load(files[-1].parent.parent, files[-1].parent.name)
 
     @app.post("/api/runs")
     def start_run(request: Request):
-        ensure_writable()
-        local_request(request)
-        result = prove_core(output_root, relative_paths=True)
-        return load_evidence(output_root, result["run_id"])
+        return execute(request, "deterministic-core")
 
     @app.post("/api/codex-runs")
     def start_codex_run(request: Request):
+        return execute(request, "codex-cycle")
+
+    @app.get("/api/executions/{run_id}")
+    def execution_status(run_id: str):
+        if RUN_ID.fullmatch(run_id) is None:
+            raise HTTPException(404, "Unknown execution")
+        record = store.get(run_id)
+        if record is None:
+            raise HTTPException(404, "Unknown execution")
+        return record
+
+    @app.post("/api/executions/{run_id}/cancel")
+    def cancel_execution(run_id: str, request: Request):
         ensure_writable()
         local_request(request)
-        if not codex_lock.acquire(blocking=False):
-            raise HTTPException(409, "A Codex experiment is already running")
-        try:
-            result = run_codex(codex_root)
-            return load_evidence(codex_root, result["run_id"])
-        finally:
-            codex_lock.release()
+        if RUN_ID.fullmatch(run_id) is None or store.get(run_id) is None:
+            raise HTTPException(404, "Unknown execution")
+        return store.cancel(run_id)
 
     @app.get("/api/runs/{run_id}")
     def get_run(run_id: str):
-        return load_evidence(locate(run_id), run_id)
+        return checked_load(locate(run_id), run_id)
 
     @app.get("/api/runs/{run_id}/download")
     def download(run_id: str):
         root = locate(run_id)
-        load_evidence(root, run_id)
+        checked_load(root, run_id)
         return Response((root / run_id / "evidence.json").read_bytes(), media_type="application/json",
                         headers={"Content-Disposition": f'attachment; filename="{run_id}.json"'})
 
     @app.get("/api/runs/{run_id}/events")
     def events(run_id: str):
-        data = load_evidence(locate(run_id), run_id)
+        data = checked_load(locate(run_id), run_id)
 
         def recorded_events():
             sequence = 0

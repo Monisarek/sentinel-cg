@@ -10,6 +10,12 @@ Status: Implementation specification — replaces previous SENTINEL-CG engineeri
 Priority: Working, independently verified capability > feature count > infrastructure complexity
 Internal feature freeze: November 4, 2026, 18:00 Asia/Ho_Chi_Minh
 
+## Current portfolio hardening amendment
+
+The owner retired competition participation and approved production-hardening work on November 7, 2026. The historical G1-G8 definitions and original evidence below retain their meaning. The active deliverable is a reviewable engineering portfolio release, with deployment readiness assessed separately in [production-readiness gates](PRODUCTION_READINESS.md).
+
+This amendment authorizes durable execution lifecycle, cross-process coordination, idempotent requests and promotion, negative security/failure tests, bounded evidence and process resources, and three structurally different deterministic evaluation scenarios. Extended scenarios do not retroactively broaden the recorded model experiment. No new live inference is authorized by this amendment; each required live validation needs explicit owner approval. Preserve PR #2, frozen historical inputs and original model evidence. No `main` merge, final release tag, new paid service or public runner exposure is authorized.
+
 ## 1. Executive decision
 
 Build SENTINEL-CG as an autonomous causal safety laboratory for AI agents.

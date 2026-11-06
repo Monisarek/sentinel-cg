@@ -141,7 +141,17 @@ def _execute_cycle(directory: Path, budget: RuntimeBudget, models: dict, seed: i
     adapters, phase = {}, "red"
     started = time.monotonic()
 
+    def begin_phase(name):
+        nonlocal phase
+        phase = name
+        control = getattr(budget, "control", None)
+        if control is not None:
+            control.stage(name)
+
     def checkpoint():
+        control = getattr(budget, "control", None)
+        if control is not None and control.stage_name != phase:
+            control.stage(phase)
         evidence["latency_seconds"] = time.monotonic() - started
         evidence["real_model_call"] = not fixture and any(
             call["provenance"].get("real_model_call") is True for adapter in adapters.values() for call in adapter.calls)
@@ -189,7 +199,7 @@ def _execute_cycle(directory: Path, budget: RuntimeBudget, models: dict, seed: i
         evidence["runtime_checks"]["verified_discovery"] = True
         evidence["gates"]["G3"] = "PASS" if live_evaluation else "PENDING"
         trace = [event["proposal"] for event in red["policy_decisions"]]
-        phase = "blue"
+        begin_phase("blue")
         budget.begin_stage("blue")
         blue = synthesizer_factory(models["blue"], budget=budget,
                                    max_completion_tokens=budget.approval.max_completion_tokens)
@@ -204,9 +214,10 @@ def _execute_cycle(directory: Path, budget: RuntimeBudget, models: dict, seed: i
         evidence["runtime_checks"]["validated_synthesis"] = True
         evidence["gates"]["G4_AI"] = "PASS" if live_evaluation else "PENDING"
         checkpoint()
-        phase = "verification"
+        begin_phase("verification")
         receipt = registry.consider(candidate, initial, task, trace, directory / "verification",
                                     input_evidence_kind=evidence_kind, check_budget=lambda: budget.remaining_seconds("blue"),
+                                    idempotency_key="repair-" + directory.name if provider == "codex" else None,
                                     artifact_root=directory if provider == "codex" else None)
         evidence["stages"]["verification"] = receipt
         if receipt["verification_path"] is not None:
@@ -228,7 +239,7 @@ def _execute_cycle(directory: Path, budget: RuntimeBudget, models: dict, seed: i
         evidence["source_trace_hash"] = digest(trace)
         evidence["runtime_checks"]["verified_promotion"] = True
         evidence["gates"]["G5"] = "PASS"
-        phase = "replay"
+        begin_phase("replay")
         budget.remaining_seconds("blue")
         machine = replay(initial, task, trace, current.patch, directory / "replay",
                          policy_hash_v0=baseline.policy_hash, policy_hash_v1=current.policy_hash,
@@ -242,7 +253,7 @@ def _execute_cycle(directory: Path, budget: RuntimeBudget, models: dict, seed: i
             evidence["runtime_status"] = "REPLAY_FAILED"
             evidence["pipeline_status"] = "FAILED"
             return evidence
-        phase = "reattack"
+        begin_phase("reattack")
         fresh_seed = (seed + 1) % 2**32
         fresh, fresh_task = seeded_state(fresh_seed)
         challenge = run_red("reattack", fresh, fresh_task, fresh_seed)

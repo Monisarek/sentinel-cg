@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { downloadUrl, normalizeEvidence, sourceLabel } from "./evidence";
@@ -147,6 +147,7 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [recorded, setRecorded] = useState(0);
+  const requestKeys = useRef<Partial<Record<"codex" | "fixture", string>>>({});
   useEffect(() => {
     let active = true;
     const runId = new URLSearchParams(window.location.search).get("run_id");
@@ -167,7 +168,8 @@ export function App() {
   }, [bundle?.run_id]);
   async function run(mode: "codex" | "fixture") {
     setBusy(true); setRunMode(mode); setError("");
-    try { const data = await readBundle(await fetch(mode === "codex" ? "/api/codex-runs" : "/api/runs", { method: "POST" })); setBundle(data); select(data.original_proposals.length); window.history.replaceState(null, "", `?run_id=${encodeURIComponent(data.run_id)}`); }
+    const key = requestKeys.current[mode] ??= crypto.randomUUID();
+    try { const response = await fetch(mode === "codex" ? "/api/codex-runs" : "/api/runs", { method: "POST", headers: { "Idempotency-Key": key } }); if (response.status < 500 && response.status !== 409) delete requestKeys.current[mode]; const data = await readBundle(response); setBundle(data); select(data.original_proposals.length); window.history.replaceState(null, "", `?run_id=${encodeURIComponent(data.run_id)}`); }
     catch (failure) { setError(failure instanceof Error ? failure.message : "The experiment could not be completed."); }
     finally { setBusy(false); }
   }

@@ -4,6 +4,7 @@ from contextlib import closing
 from dataclasses import asdict, is_dataclass, replace
 from hashlib import sha256
 import json
+from math import isfinite
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -25,6 +26,15 @@ from apps.sandbox.transitions import parse_action, transition
 
 ROOT = Path(__file__).resolve().parents[4]
 FORMAT = "sentinel-cg-portable-evidence-v1"
+MAX_JSON_BYTES = 16 * 1024 * 1024
+MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
+MAX_PACKAGE_BYTES = 256 * 1024 * 1024
+MAX_PACKAGE_FILES = 1024
+MAX_PACKAGE_ENTRIES = 4096
+MAX_PATH_DEPTH = 8
+MAX_SQLITE_ROWS = 10000
+RETENTION_POLICY = {"published_evidence": "retain_indefinitely", "automatic_deletion": False,
+                    "local_artifact_review_after_days": 30}
 
 
 def _require(condition, message):
@@ -33,7 +43,18 @@ def _require(condition, message):
 
 
 def _json(path):
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        return json.loads(_text(path))
+    except RecursionError:
+        raise ValueError("evidence exceeds the structured-data limit") from None
+
+
+def _text(path):
+    _size(path, MAX_JSON_BYTES)
+    with path.open("rb") as source:
+        raw = source.read(MAX_JSON_BYTES + 1)
+    _require(len(raw) <= MAX_JSON_BYTES, "artifact exceeds the file-size limit")
+    return raw.decode("utf-8")
 
 
 def _plain(value):
@@ -46,7 +67,47 @@ def _equal(actual, expected, label):
 
 
 def _hash(path):
-    return sha256(path.read_bytes()).hexdigest()
+    _size(path, MAX_ARTIFACT_BYTES)
+    result, count = sha256(), 0
+    with path.open("rb") as source:
+        for block in iter(lambda: source.read(1024 * 1024), b""):
+            count += len(block)
+            _require(count <= MAX_ARTIFACT_BYTES, "artifact exceeds the file-size limit")
+            result.update(block)
+    return result.hexdigest()
+
+
+def _size(path, limit):
+    _regular(path)
+    _require(path.is_file(), "artifact must be a regular file")
+    size = path.stat().st_size
+    _require(size <= limit, "artifact exceeds the file-size limit")
+    return size
+
+
+def _inventory(package):
+    """Bound directory traversal before parsing, hashing, or opening SQLite."""
+    files, entries, total = set(), 0, 0
+    pending = [(package, 0)]
+    while pending:
+        directory, depth = pending.pop()
+        _regular(directory)
+        _require(depth <= MAX_PATH_DEPTH, "package exceeds the directory-depth limit")
+        with os.scandir(directory) as children:
+            for child in children:
+                entries += 1
+                _require(entries <= MAX_PACKAGE_ENTRIES, "package exceeds the entry-count limit")
+                path = Path(child.path)
+                _regular(path)
+                if child.is_dir(follow_symlinks=False):
+                    pending.append((path, depth + 1))
+                else:
+                    _require(child.is_file(follow_symlinks=False), "package contains a non-regular artifact")
+                    files.add(path.relative_to(package).as_posix())
+                    _require(len(files) <= MAX_PACKAGE_FILES, "package exceeds the file-count limit")
+                    total += _size(path, MAX_ARTIFACT_BYTES)
+                    _require(total <= MAX_PACKAGE_BYTES, "package exceeds the total-size limit")
+    return files
 
 
 def _sealed(data, field):
@@ -79,8 +140,11 @@ def _path(root, name):
 
 
 def _git(repository, *args):
-    result = subprocess.run(["git", *map(str, args)], cwd=repository, capture_output=True, text=True,
-                            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
+    try:
+        result = subprocess.run(["git", *map(str, args)], cwd=repository, capture_output=True, text=True,
+                                timeout=60, env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
+    except subprocess.TimeoutExpired:
+        raise ValueError("Git source verification exceeded its time limit") from None
     _require(result.returncode == 0, "Git source verification failed: " + args[0])
     return result.stdout.strip()
 
@@ -93,19 +157,70 @@ def _source(repository, source, verifier):
 
 
 def _no_credentials(data):
-    forbidden = {"api_key", "model_api_key", "access_token", "refresh_token", "password",
-                 "billing_credentials", "credit_card", "authorization"}
-    if isinstance(data, dict):
-        for key, value in data.items():
-            _require(str(key).lower() not in forbidden or value in (None, ""),
-                     "credential field cannot be included in portable evidence")
-            _no_credentials(value)
-    elif isinstance(data, list):
-        for value in data:
-            _no_credentials(value)
-    elif isinstance(data, str):
-        _require(re.search(r"(?i)\bBearer\s+[a-z0-9._~+/=-]{16,}", data) is None,
-                 "authorization credential cannot be included in portable evidence")
+    forbidden = {"apikey", "modelapikey", "xapikey", "accesstoken", "refreshtoken", "idtoken",
+                 "clientsecret", "privatekey", "secretkey", "password", "billingcredentials", "creditcard", "authorization"}
+    findings = {"absolute_path_values": 0, "email_values": 0}
+    pending, count = [(data, 0)], 0
+    while pending:
+        value, depth = pending.pop()
+        count += 1
+        _require(depth <= 64 and count <= 250000, "evidence exceeds the structured-data limit")
+        if isinstance(value, dict):
+            for key, child in value.items():
+                _require(re.sub(r"[_\s-]", "", str(key)).lower() not in forbidden or child in (None, ""),
+                         "credential field cannot be included in portable evidence")
+                pending.append((child, depth + 1))
+        elif isinstance(value, (list, tuple)):
+            pending.extend((child, depth + 1) for child in value)
+        elif isinstance(value, str):
+            _require(re.search(r"(?i)\bBearer\s+[a-z0-9._~+/=-]{16,}", value) is None,
+                     "authorization credential cannot be included in portable evidence")
+            _require(re.search(r"\b(?:sk-(?:proj-)?[A-Za-z0-9_-]{20,}|LLM_[A-Za-z0-9_-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})\b|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----", value) is None,
+                     "credential pattern cannot be included in portable evidence")
+            _require(re.search(r"(?i)\b(?:model_api_key|api_key|access_token|refresh_token|password|authorization)\s*[:=]\s*['\"]?[a-z0-9._~+/=-]{8,}", value) is None,
+                     "credential assignment cannot be included in portable evidence")
+            findings["absolute_path_values"] += bool(re.search(r"(?i)(?:[a-z]:[\\/]|\\\\[^\\]+\\|/(?:home|users|tmp|var|private|mnt|etc|root)/)", value))
+            findings["email_values"] += bool(re.search(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", value))
+    return findings
+
+
+def _privacy(paths):
+    """Inspect original structured artifacts without copying or redacting them."""
+    findings = {"absolute_path_values": 0, "email_values": 0}
+
+    def inspect(value):
+        for key, count in _no_credentials(value).items():
+            findings[key] += count
+
+    for name, path in paths.items():
+        if path.suffix == ".json":
+            inspect(_json(path))
+        elif path.suffix == ".sqlite3":
+            with closing(_database(path)) as db:
+                for sql, in db.execute("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL"):
+                    inspect(sql)
+                tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                expected = {"context", "versions", "assessments"} if path.name == "policies.sqlite3" else {"sandbox_state"}
+                optional = {"promotion_requests"} if path.name == "policies.sqlite3" else set()
+                _require(expected <= tables <= expected | optional, "portable SQLite table set mismatch")
+                for table in sorted(tables):
+                    for index, row in enumerate(db.execute('SELECT * FROM "' + table + '"'), 1):
+                        _require(index <= MAX_SQLITE_ROWS, "SQLite artifact exceeds the row-count limit")
+                        for cell in row:
+                            _require(not isinstance(cell, bytes), "binary SQLite payload is not portable evidence")
+                            if isinstance(cell, str):
+                                try:
+                                    cell = json.loads(cell)
+                                except json.JSONDecodeError:
+                                    pass
+                                except RecursionError:
+                                    raise ValueError("evidence exceeds the structured-data limit") from None
+                                inspect(cell)
+        elif name == "JUDGE.md":
+            inspect(_text(path))
+    return {**findings, "credential_scan": "NO_KNOWN_PATTERNS_FOUND",
+            "scope": "allowlisted_json_sqlite_and_instructions", "source_history_review": "REQUIRED",
+            "redaction": "NONE_ORIGINAL_BYTES_PRESERVED"}
 
 
 def _report_files(directory, relative):
@@ -161,12 +276,17 @@ def export_evidence(evidence_path: Path, output_directory: Path, *, repository: 
     verifier = _git(repository, "rev-parse", "HEAD")
     _source(repository, data["project_git_commit"], verifier)
     names = _artifacts(data, directory)
+    _require(len(names) + 3 <= MAX_PACKAGE_FILES, "package exceeds the file-count limit")
     paths = {name: _path(directory, name) for name in names}
+    _require(sum(_size(path, MAX_ARTIFACT_BYTES) for path in paths.values()) <= MAX_PACKAGE_BYTES,
+             "package exceeds the total-size limit")
     _require(not (directory / ".evidence.tmp").exists(), "run is being updated")
     for path in paths.values():
         _require(not any(Path(str(path) + suffix).exists() for suffix in ("-wal", "-shm", "-journal")),
                  "SQLite sidecar indicates an unsealed run")
     originals = {name: _hash(path) for name, path in paths.items()}
+    instructions_path = repository / "docs/VERIFY_EVIDENCE.md"
+    privacy_review = _privacy({**paths, "JUDGE.md": instructions_path})
     output_directory.mkdir(parents=True, exist_ok=False)
     for name, path in paths.items():
         target = output_directory / "artifacts" / name
@@ -174,7 +294,7 @@ def export_evidence(evidence_path: Path, output_directory: Path, *, repository: 
         shutil.copyfile(path, target)
         _equal(_hash(target), originals[name], "copied artifact")
     _git(repository, "bundle", "create", str(output_directory / "source.bundle"), "HEAD")
-    instructions = (repository / "docs/VERIFY_EVIDENCE.md").read_text(encoding="utf-8")
+    instructions = _text(instructions_path)
     (output_directory / "JUDGE.md").write_text(instructions, encoding="utf-8")
     files = {"artifacts/" + name: originals[name] for name in names}
     files.update({name: _hash(output_directory / name) for name in ("source.bundle", "JUDGE.md")})
@@ -183,9 +303,11 @@ def export_evidence(evidence_path: Path, output_directory: Path, *, repository: 
                 "export_grade": "competition" if competition else "development",
                 "verifier_working_tree_dirty": verifier_dirty,
                 "run_id": data["run_id"], "evidence_kind": data["evidence_kind"],
-                "evidence_file": "artifacts/evidence.json", "files": files}
+                "evidence_file": "artifacts/evidence.json", "files": files,
+                "privacy_review": privacy_review, "retention_policy": RETENTION_POLICY}
     _equal({name: _hash(path) for name, path in paths.items()}, originals, "source run changed during export")
     (output_directory / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _inventory(output_directory)
     verify_evidence(output_directory, repository=repository)
     return {**manifest, "manifest_sha256": _hash(output_directory / "manifest.json")}
 
@@ -223,6 +345,9 @@ def _events(events, initial, task, policy, policy_hash=None):
     states, verdicts = [initial], []
     for index, event in enumerate(events, 1):
         _sealed(event, "event_hash")
+        if "duration_seconds" in event:
+            _require(type(event["duration_seconds"]) in (int, float) and isfinite(event["duration_seconds"])
+                     and event["duration_seconds"] >= 0, "invalid event duration")
         _equal(event["sequence"], index, "event sequence")
         _equal(event["task"], asdict(task), "trusted task")
         if event.get("policy_hash") is not None:
@@ -373,6 +498,8 @@ def _registry(path, data, reports):
         context = json.loads(db.execute("SELECT value FROM context WHERE id=1").fetchone()[0])
         rows = db.execute("SELECT version_id,parent_id,policy_hash,patch,verification_hash FROM versions ORDER BY sequence").fetchall()
         receipts = [json.loads(row[0]) for row in db.execute("SELECT receipt FROM assessments ORDER BY id")]
+        requests = (db.execute("SELECT request_key,request_hash,receipt FROM promotion_requests").fetchall()
+                    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='promotion_requests'").fetchone() else [])
     _equal(context, {"initial_state_hash": data["initial_state_hash"], "task": data["task"],
                      "frozen_suite_hashes": frozen_suite_hashes(), "engine_hash": _engine_hash()}, "immutable policy context")
     versions = []
@@ -403,6 +530,26 @@ def _registry(path, data, reports):
         _equal(receipt["frozen_suite_hashes"], frozen_suite_hashes(), "receipt frozen suite hashes")
         _require(not receipt["promoted"] or (report["status"] == "PASS" and all(report["checks"].values())),
                  "promotion did not pass independent verification")
+    for key, fingerprint, encoded in requests:
+        _require(re.fullmatch(r"[A-Za-z0-9_-]{1,128}", key) is not None
+                 and re.fullmatch(r"[0-9a-f]{64}", fingerprint) is not None, "invalid promotion request metadata")
+        request_receipt = json.loads(encoded)
+        _require(request_receipt in receipts, "promotion request has no recorded assessment")
+        report = next((report for recorded, report in reports
+                       if {key: value for key, value in recorded.items() if key != "evaluation"} == request_receipt), None)
+        if report is not None:
+            proposals = (data["original_proposals"] if "original_proposals" in data else
+                         [event["proposal"] for event in (data["stages"].get("red") or {}).get("policy_decisions", [])])
+            candidate = report["candidate_patch"]
+            if "original_proposals" in data:
+                fixture = _json(EVALS / "discovery/deterministic_repair.json")
+                candidate = next(fixture[key] for key in ("candidate_patch", "negative_control_patch")
+                                 if validate_patch(fixture[key]).to_dict() == report["candidate_patch"])
+            _equal(fingerprint, digest({"candidate": candidate, "initial": data["initial_state_hash"],
+                                       "task": data["task"], "proposals": proposals,
+                                       "evidence_kind": data["evidence_kind"]}), "promotion request context")
+        else:
+            _require(request_receipt.get("promoted") is False, "unverified promotion request cannot activate policy")
     return {version["version_id"]: version for version in versions}
 
 
@@ -645,17 +792,14 @@ def _proof(data, directory):
 def verify_evidence(package_directory: Path, *, repository: Path = ROOT):
     """Validate the complete package without writes, API keys, or network access."""
     package, repository = Path(package_directory).absolute(), Path(repository).resolve()
+    actual = _inventory(package)
     manifest = _json(_path(package, "manifest.json"))
     _equal(manifest["format"], FORMAT, "portable evidence format")
     _equal(manifest["schema_version"], 1, "manifest schema")
     _equal(manifest["evidence_file"], "artifacts/evidence.json", "original evidence location")
     files = manifest["files"]
     _require(type(files) is dict and {"source.bundle", "JUDGE.md", "artifacts/evidence.json"} <= files.keys(), "incomplete package manifest")
-    actual = set()
-    for path in package.rglob("*"):
-        _regular(path)
-        if path.is_file():
-            actual.add(path.relative_to(package).as_posix())
+    _require(len(files) < MAX_PACKAGE_FILES, "package exceeds the file-count limit")
     _equal(actual, set(files) | {"manifest.json"}, "package file set")
     for name, fingerprint in files.items():
         _require(re.fullmatch(r"[0-9a-f]{64}", fingerprint) is not None, "invalid artifact hash")
@@ -677,9 +821,17 @@ def verify_evidence(package_directory: Path, *, repository: Path = ROOT):
                  "competition evidence requires clean source and verifier provenance")
     expected = {"artifacts/" + name for name in _artifacts(data, package / "artifacts")}
     _equal(set(files), expected | {"source.bundle", "JUDGE.md"}, "allowlisted artifact set")
+    privacy_review = _privacy({name: _path(package, name) for name in files})
+    if "privacy_review" in manifest:
+        _equal(manifest["privacy_review"], privacy_review, "privacy review")
+    if "retention_policy" in manifest:
+        _equal(manifest["retention_policy"], RETENTION_POLICY, "retention policy")
     proof = _proof(data, package / "artifacts")
     for name, fingerprint in files.items():
         _equal(_hash(_path(package, name)), fingerprint, "package changed during verification")
     return {**proof, "export_grade": grade, "manifest_sha256": _hash(package / "manifest.json"),
             "source_commit": manifest["source_commit"], "verifier_commit": manifest["verifier_commit"],
-            "verified_files": len(files)}
+            "verified_files": len(files), "privacy_review": privacy_review,
+            "resource_limits": {"json_bytes": MAX_JSON_BYTES, "artifact_bytes": MAX_ARTIFACT_BYTES,
+                                "package_bytes": MAX_PACKAGE_BYTES, "files": MAX_PACKAGE_FILES,
+                                "entries": MAX_PACKAGE_ENTRIES, "directory_depth": MAX_PATH_DEPTH}}
