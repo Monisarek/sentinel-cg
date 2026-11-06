@@ -3,6 +3,7 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import sqlite3
+from contextlib import closing
 from tempfile import TemporaryDirectory
 import unittest
 
@@ -137,7 +138,7 @@ class ApprovalTests(unittest.TestCase):
         payload = json.dumps(legacy, sort_keys=True, separators=(",", ":"))
         self.assertEqual(encode_state(self.initial), payload)
         self.assertEqual(state_hash(self.initial), sha256(payload.encode("utf-8")).hexdigest())
-        with sqlite3.connect(self.path) as db:
+        with closing(sqlite3.connect(self.path)) as db, db:
             db.execute("UPDATE sandbox_state SET snapshot = ? WHERE id = 1", (payload,))
         self.assertEqual(Sandbox(self.path).read().production.schema_revision, 0)
         event = Gateway(self.sandbox, self.authorized_task).execute(self.proposal)
