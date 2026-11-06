@@ -1,6 +1,7 @@
 """The evidence UI serves verified recorded execution and cannot activate policy."""
 
 import json
+from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -90,7 +91,6 @@ class EvidenceAPITests(unittest.TestCase):
         original = path.read_bytes()
         try:
             import sqlite3
-from contextlib import closing
             with closing(sqlite3.connect(path)) as db, db:
                 snapshot = json.loads(db.execute("SELECT snapshot FROM sandbox_state WHERE id=1").fetchone()[0])
                 snapshot["version"] += 1
