@@ -392,7 +392,7 @@ def run_topology_evaluation(output_root, protocol_path=PROTOCOL):
               "unmeasured_model_candidates": {topology: "PENDING_NO_MODEL_MEASUREMENT" for topology in protocol["topologies"][1:]},
               "duration_seconds": monotonic() - started,
               "limitations": LIMITATIONS,
-              "evidence_path": str((directory / "evidence.json").resolve())}
+              "evidence_path": "evidence.json"}
     report["bundle_hash"] = digest(report)
     (directory / "evidence.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     return report
