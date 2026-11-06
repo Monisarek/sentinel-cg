@@ -160,6 +160,20 @@ class EvidenceAPITests(unittest.TestCase):
         save()
         self.assertEqual(self.client.get(prefix).status_code, 409)
 
+    def test_read_only_workspace_disables_execution_but_serves_verified_evidence(self):
+        with TestClient(create_app(self.root, self.root / "missing-dist", read_only=True)) as client, \
+             patch("apps.control.sentinel.api.app.prove_core") as proof, \
+             patch("apps.control.sentinel.api.app.run_codex") as codex:
+            self.assertEqual(client.get("/api/runs/" + self.run_id).status_code, 200)
+            self.assertEqual(client.get("/api/runs/" + self.run_id + "/download").content,
+                             (self.root / self.run_id / "evidence.json").read_bytes())
+            for route in ("/api/runs", "/api/codex-runs"):
+                response = client.post(route, headers={"origin": "http://testserver"})
+                self.assertEqual(response.status_code, 403, response.text)
+                self.assertIn("Read-only", response.json()["detail"])
+            proof.assert_not_called()
+            codex.assert_not_called()
+
     def test_local_codex_entry_point_rejects_external_requests_and_serializes_execution(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
