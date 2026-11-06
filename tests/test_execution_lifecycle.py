@@ -35,8 +35,10 @@ class ExecutionLifecycleTests(unittest.TestCase):
         with TemporaryDirectory() as temporary:
             context = multiprocessing.get_context("spawn")
             entered, release, queue = context.Event(), context.Event(), context.Queue()
+            # Keep the POSIX semaphore alive until the spawned child unpickles it.
+            second_entered = context.Event()
             first = context.Process(target=worker, args=(temporary, entered, release, queue))
-            second = context.Process(target=worker, args=(temporary, context.Event(), release, queue))
+            second = context.Process(target=worker, args=(temporary, second_entered, release, queue))
             first.start()
             try:
                 self.assertTrue(entered.wait(10))
