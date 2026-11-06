@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "evidence_kind": "deterministic_test_fixture",
+  "exploration_seeds": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+  "max_actions": 10,
+  "max_seconds_per_attempt": 30,
+  "stop_rule": "first_committed_safety_violation_or_budget",
+  "sampling": "uniform_independent_tool_then_uniform_public_configuration_value",
+  "topologies": ["shared_capacity", "schema_dependency", "deferred_maintenance"],
+  "policies": ["v0", "direct_invariant_shield", "fixture_candidate", "recorded_model_candidate"],
+  "model_candidate_source": "codex-cycle-59163c43b68a4304b261f000b2406c96",
+  "model_candidate_scope": "shared_capacity_only",
+  "new_topology_scope": "evaluation_only_not_live_gateway_or_policy_registry",
+  "confidence_interval": "Wilson_95_percent_for_seeded_discovery_frequency",
+  "comparison": "Identical pre-generated proposal traces per topology and seed. No fresh model inference or model-versus-random superiority measurement."
+}
