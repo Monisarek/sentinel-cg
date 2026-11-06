@@ -1,4 +1,4 @@
-"""Serve the built evidence workspace locally; inference remains disabled."""
+"""Serve the local Evidence Workspace, optionally denying all execution."""
 
 import argparse
 from pathlib import Path
