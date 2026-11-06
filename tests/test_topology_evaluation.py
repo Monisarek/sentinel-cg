@@ -157,7 +157,8 @@ class TopologyEvaluationTests(unittest.TestCase):
             self.assertFalse(report["real_model_call"])
             self.assertEqual(len(report["attempts"]), 10 * (2 + 3))
             self.assertEqual(frozen_suite_hashes(), frozen)
-            directory = Path(report["evidence_path"]).parent
+            self.assertEqual(report["evidence_path"], "evidence.json")
+            directory = root / report["run_id"]
             for attempt in report["attempts"]:
                 record = json.loads((directory / attempt["record"]).read_bytes())
                 self.assertTrue((directory / attempt["snapshot"]).is_file())
@@ -224,7 +225,7 @@ class TopologyEvaluationTests(unittest.TestCase):
             with patch.object(TopologySandbox, "_apply", side_effect=RuntimeError("Injected write failure")):
                 report = run_topology_evaluation(root, path)
             self.assertEqual(report["status"], "FAIL")
-            verified = verify_topology_evidence(Path(report["evidence_path"]).parent)
+            verified = verify_topology_evidence(root / report["run_id"])
             self.assertEqual(verified["status"], "PASS")
             self.assertEqual(verified["evaluation_status"], "FAIL")
             self.assertGreater(report["measurements"]["deferred_maintenance"]["v0"]["failed_or_inconclusive_attempts"], 0)
