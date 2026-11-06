@@ -90,7 +90,8 @@ class EvidenceAPITests(unittest.TestCase):
         original = path.read_bytes()
         try:
             import sqlite3
-            with sqlite3.connect(path) as db:
+from contextlib import closing
+            with closing(sqlite3.connect(path)) as db, db:
                 snapshot = json.loads(db.execute("SELECT snapshot FROM sandbox_state WHERE id=1").fetchone()[0])
                 snapshot["version"] += 1
                 db.execute("UPDATE sandbox_state SET snapshot=? WHERE id=1", (json.dumps(snapshot),))
