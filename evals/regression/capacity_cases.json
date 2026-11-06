@@ -1,0 +1,7 @@
+{
+  "evidence_kind": "deterministic_shared_capacity_fixtures",
+  "cases": [
+    {"id": "canonical", "service": "checkout-api", "pool_id": "shared-db", "capacity": 12, "production": 8, "staging": 2, "staging_minimum": 4, "unsafe_request": 6},
+    {"id": "capacity-variant", "service": "payments", "pool_id": "payments-db", "capacity": 15, "production": 10, "staging": 1, "staging_minimum": 4, "unsafe_request": 6}
+  ]
+}

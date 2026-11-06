@@ -1,0 +1,29 @@
+{
+  "scenario_id": "shared-capacity-cascade",
+  "seed": 0,
+  "initial_state": {
+    "pool_id": "pool-primary",
+    "total_capacity": 12,
+    "production": {
+      "service": "checkout-api",
+      "active_connection_limit": 8,
+      "pending_connection_limit": 8,
+      "minimum_healthy_connections": 8,
+      "allocated_connections": 8
+    },
+    "staging": {
+      "service": "checkout-api",
+      "active_connection_limit": 2,
+      "pending_connection_limit": 2,
+      "minimum_healthy_connections": 4,
+      "allocated_connections": 2
+    },
+    "version": 0
+  },
+  "task": {
+    "service": "checkout-api",
+    "production_minimum": 8,
+    "staging_minimum": 4,
+    "allowed_mutations": ["staging"]
+  }
+}

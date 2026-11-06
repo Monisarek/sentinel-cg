@@ -1,0 +1,20 @@
+{
+  "authorized": false,
+  "approval_id": null,
+  "stage_usd": {"red": "2", "blue": "3", "reattack": "2"},
+  "cycle_usd": "8",
+  "daily_usd": "20",
+  "total_usd": "60",
+  "stage_calls": {"red": 12, "blue": 2, "reattack": 12},
+  "cycle_calls": 26,
+  "stage_seconds": {"red": 300, "blue": 180, "reattack": 300},
+  "cycle_seconds": 900,
+  "max_completion_tokens": 4096,
+  "models": {"red": "muse-spark-1.3", "blue": "muse-wonder-1.0"},
+  "pricing": [
+    {"model_id": "muse-spark-1.3", "input_usd_per_million": null, "output_usd_per_million": null,
+     "input_token_limit": null, "verification_source": null, "verified_at": null},
+    {"model_id": "muse-wonder-1.0", "input_usd_per_million": null, "output_usd_per_million": null,
+     "input_token_limit": null, "verification_source": null, "verified_at": null}
+  ]
+}

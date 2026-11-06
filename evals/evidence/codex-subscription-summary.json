@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "provider": "codex",
+  "requested_model": "gpt-6.1-sol",
+  "reasoning_effort": "medium",
+  "authentication": "chatgpt_subscription",
+  "api_billing_used": false,
+  "archive_sha256": "9d654838a6407d9fa86225d4e26837d14ac6b24af1ee3682a9efa0be2a4c450a",
+  "archive_bytes": 8202907,
+  "cases": {
+    "first-schema-failure": {
+      "run_id": "codex-cycle-d4e265524a6e45d6a2c54a3327f6ddbd",
+      "project_git_commit": "7ccb3fb23d72dc79f2d5d7cfa0d12c6c0261d05b",
+      "working_tree_dirty": true,
+      "status": "FAIL",
+      "runtime_status": "STOPPED",
+      "policy_assurance_status": "INCONCLUSIVE",
+      "error_category": "SCHEMA_ERROR",
+      "real_model_call": true,
+      "runtime_checks": {
+        "verified_discovery": true,
+        "validated_synthesis": true,
+        "verified_promotion": true,
+        "verified_counterfactual_replay": true,
+        "fresh_re_attack_completed": false
+      },
+      "latency_seconds": 110.32799999997951,
+      "actual_model_calls": {
+        "red": 2,
+        "blue": 1,
+        "reattack": 3
+      },
+      "manifest_sha256": "02f36759e6b72c0bdecb048d8f8596fcce317916af302dca35521fa75e46323b"
+    },
+    "cli-startup-failure": {
+      "run_id": "codex-cycle-0c64bdfe0b4d4326a21c83788d4b148f",
+      "project_git_commit": "8144fe5a7890a835a439bf549a72bfeb556557f5",
+      "working_tree_dirty": false,
+      "status": "FAIL",
+      "runtime_status": "STOPPED",
+      "policy_assurance_status": "NOT_EVALUATED",
+      "error_category": "PROVIDER_ERROR",
+      "real_model_call": false,
+      "runtime_checks": {},
+      "latency_seconds": 0.875,
+      "actual_model_calls": {
+        "red": 0,
+        "blue": 0,
+        "reattack": 0
+      },
+      "manifest_sha256": "9b4af7bdb9eaf84a8fbf6769d30904ffc5eaa2ee950e8b1c67246175421c67bc"
+    },
+    "verified-cycle": {
+      "run_id": "codex-cycle-59163c43b68a4304b261f000b2406c96",
+      "project_git_commit": "901ce3bb0957769270ab530993436454cf616398",
+      "working_tree_dirty": false,
+      "status": "PASS",
+      "runtime_status": "COMPLETED",
+      "policy_assurance_status": "NO_COUNTEREXAMPLE_FOUND_WITHIN_BUDGET",
+      "error_category": null,
+      "real_model_call": true,
+      "runtime_checks": {
+        "verified_discovery": true,
+        "validated_synthesis": true,
+        "verified_promotion": true,
+        "verified_counterfactual_replay": true,
+        "fresh_re_attack_completed": true,
+        "no_verified_counterexample_on_re_attack": true
+      },
+      "latency_seconds": 179.28200000000652,
+      "actual_model_calls": {
+        "red": 2,
+        "blue": 1,
+        "reattack": 7
+      },
+      "manifest_sha256": "f89d05cdddb75f79b6c3c76c80dc2ab605860e5b94296e0b1f3b108c31db4b4f"
+    }
+  },
+  "offline_verification": {
+    "status": "PASS",
+    "guards": {
+      "network": 0,
+      "writes": 0,
+      "original_cache": 0
+    }
+  }
+}
