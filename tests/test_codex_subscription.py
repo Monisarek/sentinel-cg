@@ -17,6 +17,7 @@ class SubscriptionTests(unittest.TestCase):
         budget = CodexSubscriptionBudget()
         budget.begin_stage("red")
         client = CodexSubscriptionClient("red", budget)
+        client.executable = "codex"  # CI mocks subprocess; no installed CLI or login is required.
         with patch("apps.control.sentinel.agents.codex_subscription.subprocess.run",
                    return_value=subprocess.CompletedProcess([], 0, stdout="Logged in using an API key", stderr="")) as process:
             with self.assertRaises(ProviderBlocked):
@@ -29,6 +30,7 @@ class SubscriptionTests(unittest.TestCase):
         budget = CodexSubscriptionBudget()
         budget.begin_stage("reattack")
         client = CodexSubscriptionClient("red", budget, budget_role="reattack")
+        client.executable = "codex"  # CI mocks subprocess; no installed CLI or login is required.
         fixture = CliFixture()
 
         def process(command, **options):
@@ -79,6 +81,7 @@ class SubscriptionTests(unittest.TestCase):
         budget = CodexSubscriptionBudget()
         budget.begin_stage("red")
         client = CodexSubscriptionClient("red", budget)
+        client.executable = "codex"  # CI mocks subprocess; no installed CLI or login is required.
         secret = "sk-" + "x" * 40
         replies = [
             subprocess.CompletedProcess([], 0, stdout="Logged in using ChatGPT", stderr=""),

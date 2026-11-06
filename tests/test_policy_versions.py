@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import shutil
 import sqlite3
+from contextlib import closing
 from threading import Barrier
 from tempfile import TemporaryDirectory
 import unittest
@@ -88,7 +89,7 @@ class PolicyVersionTests(unittest.TestCase):
         self.assertTrue(all(report["checks"].values()))
         self.assertEqual(digest(report), self.accepted["verification_hash"])
         self.assertEqual(self.promoted.verification_hash, self.accepted["verification_hash"])
-        with sqlite3.connect(self.registry.path) as db:
+        with closing(sqlite3.connect(self.registry.path)) as db, db:
             receipts = [json.loads(row[0]) for row in db.execute("SELECT receipt FROM assessments ORDER BY id")]
         self.assertEqual(receipts, [self.rejected, self.accepted])
         self.assertEqual(self.accepted["policy_hash"], self.promoted.policy_hash)
@@ -107,7 +108,7 @@ class PolicyVersionTests(unittest.TestCase):
         path = self.root / "copy.sqlite3"
         shutil.copy2(self.registry.path, path)
         registry = PolicyRegistry(path)
-        with sqlite3.connect(path) as db:
+        with closing(sqlite3.connect(path)) as db, db:
             for table, field in (("versions", "policy_hash"), ("context", "value"), ("assessments", "receipt")):
                 for statement in (f"UPDATE {table} SET {field}='changed'", f"DELETE FROM {table}"):
                     with self.subTest(statement=statement), self.assertRaisesRegex(sqlite3.IntegrityError, "immutable"):
@@ -240,7 +241,7 @@ class PolicyVersionTests(unittest.TestCase):
         rejected = next(receipt for receipt in receipts if not receipt["promoted"])
         self.assertEqual(rejected["reason"], "active_policy_changed_during_verification")
         self.assertEqual(registry.active.version_id, "v1")
-        with sqlite3.connect(registry.path) as db:
+        with closing(sqlite3.connect(registry.path)) as db, db:
             self.assertEqual(db.execute("SELECT COUNT(*) FROM versions").fetchone()[0], 2)
 
     def test_second_promotion_and_unknown_version_cannot_bypass_gate(self):

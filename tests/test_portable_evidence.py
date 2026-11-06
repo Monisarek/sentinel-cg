@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import sqlite3
+from contextlib import closing
 import stat
 import subprocess
 import sys
@@ -226,7 +227,7 @@ class PortableEvidenceTests(unittest.TestCase):
     def test_rehashed_sqlite_tamper_is_rejected_by_snapshot_binding(self):
         package = self.copy_package()
         path = package / "artifacts/safe-repair.sqlite3"
-        with sqlite3.connect(path) as db:
+        with closing(sqlite3.connect(path)) as db, db:
             state = json.loads(db.execute("SELECT snapshot FROM sandbox_state").fetchone()[0])
             state["version"] += 1
             db.execute("UPDATE sandbox_state SET snapshot=?", (json.dumps(state),))

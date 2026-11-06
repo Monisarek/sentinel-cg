@@ -15,7 +15,8 @@ handcrafted fixture can be inspected without subscription access.
 
 [Portfolio case study](docs/PORTFOLIO.md) ·
 [Architecture and trust boundaries](docs/PORTFOLIO.md#architecture-and-trust-boundaries) ·
-[Verify the evidence](docs/VERIFY_EVIDENCE.md)
+[Verify the evidence](docs/VERIFY_EVIDENCE.md) ·
+[Production-readiness gates and limitations](docs/PRODUCTION_READINESS.md)
 
 ![Codex experiment showing production at 7 under v0 and 8 under verified v1](docs/images/codex-experiment.png)
 
