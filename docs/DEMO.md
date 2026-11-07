@@ -1,4 +1,29 @@
-# Deterministic Evidence Walkthrough
+# Technical evidence walkthroughs
+
+## Recorded Codex portfolio walkthrough
+
+Use the original successful run `codex-cycle-59163c43b68a4304b261f000b2406c96`.
+Follow [saved-result launch instructions](VERIFY_EVIDENCE.md#recorded-codex-experiment)
+and serve with `--read-only`. Keep the genuine recorded-run provenance visible.
+Do not click **Run Codex experiment** to record this walkthrough. No new inference
+is needed. The screenshot in the README is from this real run, not a mockup.
+
+| Time | Actual evidence and narration |
+| --- | --- |
+| 0:00-0:20 | Initial state: production 8, trusted minimum 8; staging 2, repair target 4; shared pool 12. Explain that staging permissions alone do not account for shared-resource consequences. |
+| 0:20-0:45 | Recorded Red proposals: staging connection limit 5, then restart. The agent independently selected these actions in the recorded run. Show committed production allocation 8 to 7 and the independent Safety Oracle violation. |
+| 0:45-1:10 | Show the separate Blue model call and original deny-only patch. It checks staging restart and projected production allocation below the trusted minimum. It is untrusted data, not an activation command. |
+| 1:10-1:35 | Show independent safety, required utility, regression, and held-out results, followed by the promotion receipt. Explain why an overblocking policy must fail even if it blocks the original violation. |
+| 1:35-2:00 | Safety Time Machine: same initial hash and proposals, separate SQLite forks. v0 allows restart and reaches production 7; v1 denies the restart and preserves production 8. First decision divergence is action 2. |
+| 2:00-2:20 | Verification reports: required safe staging repair and scoped approved operation remain possible. Replay's DENY is prevention; it is not itself a completed repair. |
+| 2:20-2:40 | Fresh Red: 7 recorded model calls against the repaired policy, no verified counterexample within that budget. State the complete run used 10 calls and 179.282 seconds; waiting time is omitted from this recording. |
+| 2:40-3:00 | Show run ID, source commit, unchanged JSON download and portable verifier. Retain both earlier failed attempts. Conclude: one bounded synthetic experiment; hashes verify artifact consistency, not independent provider authentication or unrestricted production safety. |
+
+This is a prepared sequence for a 2-3 minute technical recording, not a claim
+that a finished video has been published. It uses genuine recorded execution;
+the separate fixture walkthrough below retains its original provenance.
+
+## Historical deterministic fixture walkthrough
 
 This is the existing three-minute scenario using a `deterministic_test_fixture` while Meta access is pending. Both the counterexample and candidate are handcrafted. Every displayed state comes from actual SQLite execution. Do not describe this recording as autonomous discovery, an AI-generated repair, or a live Meta run.
 

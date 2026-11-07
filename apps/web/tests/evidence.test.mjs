@@ -20,8 +20,38 @@ registerHooks({
     return nextLoad(url, context);
   },
 });
-const { App, Workspace } = await import("../src/main.tsx");
+const { App, Workspace, requestExperiment } = await import("../src/main.tsx");
 const render = (raw, selected = 1) => renderToStaticMarkup(createElement(Workspace, { bundle: normalizeEvidence(raw), selected, select() {}, recorded: 0 }));
+
+test("a lost HTTP 200 body reuses the original request key instead of duplicating inference", async context => {
+  const keys = {}, requests = [];
+  let attempts = 0;
+  context.mock.method(globalThis, "fetch", async (url, options) => {
+    requests.push({ url, key: options.headers["Idempotency-Key"] });
+    return { ok: true, status: 200, async json() {
+      if (++attempts === 1) throw new TypeError("Recorded response body was interrupted");
+      return runtime();
+    } };
+  });
+  await assert.rejects(requestExperiment("codex", keys), /body was interrupted/);
+  assert.equal(keys.codex, requests[0].key);
+  await requestExperiment("codex", keys);
+  assert.equal(requests[1].key, requests[0].key);
+  assert.equal(requests[0].url, "/api/codex-runs");
+  assert.equal(keys.codex, undefined);
+});
+
+test("server failures and conflict responses retain the original experiment key", async context => {
+  const keys = {}, requests = [];
+  context.mock.method(globalThis, "fetch", async (url, options) => {
+    requests.push(options.headers["Idempotency-Key"]);
+    return { ok: false, status: requests.length === 1 ? 503 : 409 };
+  });
+  await assert.rejects(requestExperiment("codex", keys), /HTTP 503/);
+  await assert.rejects(requestExperiment("codex", keys), /HTTP 409/);
+  assert.equal(requests[0], requests[1]);
+  assert.equal(keys.codex, requests[0]);
+});
 
 test("the application entrypoint separates the subscription Codex run from the local fixture", () => {
   const html = renderToStaticMarkup(createElement(App));

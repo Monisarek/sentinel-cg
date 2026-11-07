@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { downloadUrl, normalizeEvidence, sourceLabel } from "./evidence";
@@ -14,6 +14,13 @@ const symbols: Record<string, string> = { eq: "=", neq: "≠", lt_field: "<", lt
 async function readBundle(response: Response): Promise<Bundle> {
   if (!response.ok) throw new Error(`Evidence request failed (HTTP ${response.status}).`);
   return normalizeEvidence(await response.json());
+}
+
+export async function requestExperiment(mode: "codex" | "fixture", keys: Partial<Record<"codex" | "fixture", string>>): Promise<Bundle> {
+  const key = keys[mode] ??= crypto.randomUUID();
+  const data = await readBundle(await fetch(mode === "codex" ? "/api/codex-runs" : "/api/runs", { method: "POST", headers: { "Idempotency-Key": key } }));
+  delete keys[mode];
+  return data;
 }
 
 function Status({ pass, children }: { pass: boolean; children: ReactNode }) {
@@ -147,6 +154,7 @@ export function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [recorded, setRecorded] = useState(0);
+  const requestKeys = useRef<Partial<Record<"codex" | "fixture", string>>>({});
   useEffect(() => {
     let active = true;
     const runId = new URLSearchParams(window.location.search).get("run_id");
@@ -167,7 +175,7 @@ export function App() {
   }, [bundle?.run_id]);
   async function run(mode: "codex" | "fixture") {
     setBusy(true); setRunMode(mode); setError("");
-    try { const data = await readBundle(await fetch(mode === "codex" ? "/api/codex-runs" : "/api/runs", { method: "POST" })); setBundle(data); select(data.original_proposals.length); window.history.replaceState(null, "", `?run_id=${encodeURIComponent(data.run_id)}`); }
+    try { const data = await requestExperiment(mode, requestKeys.current); setBundle(data); select(data.original_proposals.length); window.history.replaceState(null, "", `?run_id=${encodeURIComponent(data.run_id)}`); }
     catch (failure) { setError(failure instanceof Error ? failure.message : "The experiment could not be completed."); }
     finally { setBusy(false); }
   }

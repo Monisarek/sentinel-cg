@@ -18,7 +18,7 @@ class SubscriptionTests(unittest.TestCase):
         budget.begin_stage("red")
         client = CodexSubscriptionClient("red", budget)
         client.executable = "codex"  # CI mocks subprocess; no installed CLI or login is required.
-        with patch("apps.control.sentinel.agents.codex_subscription.subprocess.run",
+        with patch("apps.control.sentinel.agents.codex_subscription.bounded_run",
                    return_value=subprocess.CompletedProcess([], 0, stdout="Logged in using an API key", stderr="")) as process:
             with self.assertRaises(ProviderBlocked):
                 client.complete("Explicit unit fixture.", DECISION_SCHEMA)
@@ -41,14 +41,15 @@ class SubscriptionTests(unittest.TestCase):
             self.assertIn('model_reasoning_effort="medium"', command)
             return fixture(command, **options)
 
-        with patch("apps.control.sentinel.agents.codex_subscription.subprocess.run", side_effect=process):
+        with patch("apps.control.sentinel.agents.codex_subscription.bounded_run", side_effect=process):
             data, metadata = client.complete("Explicit unit fixture.", DECISION_SCHEMA)
         self.assertEqual(budget.calls["reattack"], 1)
         self.assertEqual(budget.calls["red"], 0)
         self.assertEqual(metadata["reasoning_effort"], "medium")
         self.assertEqual(metadata["model_id"], "gpt-6.1-sol")
         self.assertNotIn("response_id", metadata)
-        self.assertEqual(client.diagnostics[0]["request"]["prompt"], "Explicit unit fixture.")
+        self.assertEqual(client.diagnostics[0]["request"]["prompt_bytes"], len("Explicit unit fixture."))
+        self.assertNotIn("Explicit unit fixture.", str(client.diagnostics))
 
     def test_stage_call_and_wall_clock_limits_fail_closed(self):
         budget = CodexSubscriptionBudget()
@@ -87,7 +88,7 @@ class SubscriptionTests(unittest.TestCase):
             subprocess.CompletedProcess([], 0, stdout="Logged in using ChatGPT", stderr=""),
             subprocess.CompletedProcess([], 1, stdout="", stderr="Startup failed: " + secret),
         ]
-        with patch("apps.control.sentinel.agents.codex_subscription.subprocess.run", side_effect=replies) as process:
+        with patch("apps.control.sentinel.agents.codex_subscription.bounded_run", side_effect=replies) as process:
             with self.assertRaises(ProviderTransportError):
                 client.complete("Explicit unit fixture.", DECISION_SCHEMA)
         self.assertEqual(process.call_count, 2)
@@ -95,6 +96,38 @@ class SubscriptionTests(unittest.TestCase):
         self.assertEqual(client.calls, [])
         self.assertNotIn(secret, str(client.diagnostics))
         self.assertEqual(client.diagnostics[-1]["error_category"], "CLI_EXECUTION_ERROR")
+
+    def test_oversized_prompt_never_checks_login_or_starts_cli(self):
+        from apps.control.sentinel.agents.process import ResourceLimit, MAX_INPUT_BYTES
+        budget = CodexSubscriptionBudget()
+        budget.begin_stage("red")
+        client = CodexSubscriptionClient("red", budget)
+        with patch("apps.control.sentinel.agents.codex_subscription.bounded_run") as process:
+            with self.assertRaises(ResourceLimit):
+                client.complete("x" * (MAX_INPUT_BYTES + 1), DECISION_SCHEMA)
+            process.assert_not_called()
+        self.assertEqual(budget.calls["red"], 0)
+
+    def test_oversized_answer_is_rejected_without_recording_a_completed_call(self):
+        from apps.control.sentinel.agents.process import ResourceLimit, MAX_OUTPUT_BYTES
+        from tests.test_codex_provider import CliFixture
+        budget = CodexSubscriptionBudget()
+        budget.begin_stage("red")
+        client = CodexSubscriptionClient("red", budget)
+        client.executable = "codex"
+        fixture = CliFixture()
+
+        def process(command, **options):
+            if command[1:] == ["login", "status"]:
+                return subprocess.CompletedProcess(command, 0, stdout="Logged in using ChatGPT", stderr="")
+            result = fixture(command, **options)
+            answer = Path(command[command.index("--output-last-message") + 1])
+            answer.write_bytes(b"x" * (MAX_OUTPUT_BYTES + 1))
+            return result
+        with patch("apps.control.sentinel.agents.codex_subscription.bounded_run", side_effect=process):
+            with self.assertRaises(ResourceLimit):
+                client.complete("Explicit unit fixture.", DECISION_SCHEMA)
+        self.assertEqual(client.calls, [])
 
 
 if __name__ == "__main__":

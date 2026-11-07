@@ -223,7 +223,9 @@ class CodexProviderTests(unittest.TestCase):
                     client.complete("Unit-test prompt.", DECISION_SCHEMA)
             self.assertEqual(len(fixture.invocations), 1)
             self.assertEqual(client.calls, [])
-            self.assertIn(message, client.diagnostics[0]["reported_errors"])
+            self.assertEqual(client.diagnostics[0]["reported_errors"],
+                             ["Provider error details omitted; no retry was attempted"])
+            self.assertNotIn(message, str(client.diagnostics))
 
     def test_native_tool_attempts_are_rejected_without_gateway_or_database_writes(self):
         with TemporaryDirectory() as directory:

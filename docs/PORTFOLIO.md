@@ -25,6 +25,8 @@ remains inspectable without subscription access. [Offline fixture archive](../ev
 ```mermaid
 flowchart TD
     subgraph Inputs["Untrusted proposal data"]
+        Red["Red: Adversarial Explorer"]
+        Blue["Blue: Policy Synthesizer"]
         Actions["Agent-selected action proposals or labeled fixture"]
         Candidate["Agent-generated deny-only patch or labeled fixture"]
     end
@@ -46,6 +48,8 @@ flowchart TD
         Verifier["Read-only portable verifier"]
     end
 
+    Red --> Actions
+    Blue --> Candidate
     Actions --> Gateway
     Candidate --> Verify
     Contract --> Gateway
@@ -73,6 +77,12 @@ flowchart TD
   Preview and execution share the pure transition. The host supplies approvals
   and invariant thresholds, outside the proposal data. [Gateway](../apps/control/sentinel/gateway/__init__.py) ·
   [Sandbox](../apps/sandbox)
+- **Runner boundary.** Separate ephemeral Codex processes return proposal data.
+  Native execution tools are disabled. The Windows supervisor enforces Job Object
+  resource limits and kills descendants when it exits, while the process still
+  uses the operator's identity and authentication. This is resource containment,
+  not isolation from private files or network access. The read-only viewer never
+  starts this runner. [Threat model and operations](PRODUCTION_READINESS.md)
 - **Independent safety and utility.** The Safety Oracle reads committed values
   and checks the declared production minimum, exact approval scope, and state
   preservation on DENY. The Utility Oracle checks required workflow outcomes.
@@ -194,6 +204,11 @@ contains the recorded attempts. [Audit and historical checks](AUDIT.md)
 
 ## Trade-offs and limits
 
+- SQLite keeps version checks, preview, commit, and rollback in one inspectable
+  local transaction without a separate database service. A kernel file lock
+  coordinates complete experiments across local processes; a second SQLite
+  journal retains lifecycle, idempotency, cancellation, and recovery history.
+  This assumes a trusted local filesystem, not distributed or network storage.
 - SQLite and a small transition model make the state inspectable and repeatable.
   Production infrastructure could behave differently, so the demonstrated
   safety result is conditional on the modeled topology and invariant.

@@ -17,7 +17,7 @@ the repository root and use the existing built workspace:
 
 ```powershell
 Expand-Archive .\evals\evidence\codex-subscription-evidence.zip .\.cache\codex-recorded
-.\.venv\Scripts\python.exe -m scripts.serve_evidence --output-dir .cache/codex-recorded/codex-subscription-proof/recorded-runs
+.\.venv\Scripts\python.exe -m scripts.serve_evidence --read-only --output-dir .cache/codex-recorded/codex-subscription-proof/recorded-runs
 ```
 
 Open <http://127.0.0.1:8000/?run_id=codex-cycle-59163c43b68a4304b261f000b2406c96>.
@@ -89,6 +89,43 @@ original reports, SQLite snapshots, and Git source for independent verification.
 The exporter rejects unresolved source commits, changing files, SQLite sidecars,
 credential fields, and symlinks. The package intentionally excludes the persistent
 spending ledger: replaying recorded evidence never authorizes another model call.
+
+## Resource, privacy, and retention boundaries
+
+The current exporter and verifier enforce fixed limits before parsing, hashing,
+or opening an artifact: 16 MiB per JSON/instructions file, 64 MiB per artifact,
+256 MiB per package, 1,024 files, 4,096 directory entries, and eight directory
+levels. SQLite inspection is limited to 10,000 rows per allowlisted table.
+Hashes use bounded streaming reads. Git checks have a 60-second timeout.
+The verifier rejects symlinks/reparse points, unexpected SQLite tables, binary
+SQLite payloads, excessive structured-data nesting, and oversized inputs. These
+are defensive local-tool limits, not a guarantee against arbitrary hostile Git
+or SQLite parser defects. Verify with an updated, trusted local toolchain.
+
+Every selected JSON report, SQLite text/schema field, and copied instruction
+file is checked for credential fields, bearer credentials, known key patterns,
+and private-key markers. A detected credential aborts export before artifacts
+are copied. New manifests contain a recomputed `privacy_review` with counts of
+absolute local paths and email-like values; it never echoes those values.
+Original bytes are preserved, so a nonzero count requires human publication
+review. Historical path strings remain inert metadata and can reveal a former
+local username even though verification never follows them.
+
+Pattern checks cannot prove the absence of secrets or personal information in
+arbitrary prose, images, encrypted content, or Git history. `source.bundle`
+includes reachable source history and requires separate human review. The
+manifest explicitly records `source_history_review=REQUIRED`; a clean working
+tree or `NO_KNOWN_PATTERNS_FOUND` result is not a privacy certification. Do not
+publish a sensitive package. Preserve the original privately and prepare a
+separately identified public artifact with owner approval if redaction is needed.
+
+Retention is explicit: published evidence is retained indefinitely, and local
+unpublished artifacts require operator review after 30 days. Export and verify
+never delete runs, failures, source history, or existing packages. Each export
+creates only the requested new directory within the package limits. Review local
+disk usage and remove unnecessary unpublished copies deliberately; do not delete
+an active run or rewrite a published artifact. No secure-erasure claim is made.
+The manifest records this policy, and the verifier remains read-only.
 
 ## Recorded clean-checkout proof
 

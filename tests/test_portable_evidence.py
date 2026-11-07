@@ -224,6 +224,19 @@ class PortableEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "actual delta mismatch"):
             verify_evidence(package)
 
+    def test_rehashed_negative_event_duration_is_rejected(self):
+        package = self.copy_package()
+        path = package / "artifacts/evidence.json"
+        evidence = json.loads(path.read_text(encoding="utf-8"))
+        event = evidence["safe_repair_after_promotion"]["events"][0]
+        event["duration_seconds"] = -1
+        event.pop("event_hash")
+        event["event_hash"] = digest(event)
+        write_json(path, evidence)
+        reseal_package(package)
+        with self.assertRaisesRegex(ValueError, "invalid event duration"):
+            verify_evidence(package)
+
     def test_rehashed_sqlite_tamper_is_rejected_by_snapshot_binding(self):
         package = self.copy_package()
         path = package / "artifacts/safe-repair.sqlite3"
@@ -383,6 +396,111 @@ class PortableEvidenceTests(unittest.TestCase):
         write_json(source / "evidence.json", evidence)
         with self.assertRaises(ValueError):
             export_evidence(source / "evidence.json", self.work / "invalid-package")
+
+    def test_package_limits_fail_before_hashing_or_opening_sqlite(self):
+        from apps.control.sentinel.evidence import portable
+        for limit in ("MAX_ARTIFACT_BYTES", "MAX_PACKAGE_BYTES", "MAX_PACKAGE_FILES", "MAX_PACKAGE_ENTRIES"):
+            with self.subTest(limit=limit), patch.object(portable, limit, 1), \
+                    patch.object(portable, "_hash", side_effect=AssertionError("Hashing must not start")), \
+                    patch.object(portable, "_database", side_effect=AssertionError("SQLite must not open")):
+                with self.assertRaisesRegex(ValueError, "limit"):
+                    verify_evidence(self.core_package)
+
+    def test_json_size_and_package_depth_are_bounded(self):
+        from apps.control.sentinel.evidence import portable
+        with patch.object(portable, "MAX_JSON_BYTES", 1):
+            with self.assertRaisesRegex(ValueError, "file-size limit"):
+                verify_evidence(self.core_package)
+        package = self.copy_package()
+        nested = package
+        for _ in range(portable.MAX_PATH_DEPTH + 1):
+            nested /= "nested"
+        nested.mkdir(parents=True)
+        with self.assertRaisesRegex(ValueError, "directory-depth limit"):
+            verify_evidence(package)
+
+    def test_json_read_limit_survives_a_stale_size_observation(self):
+        from apps.control.sentinel.evidence import portable
+        path = self.work / "growing.json"
+        path.write_text('{"value":"larger-than-the-observed-size"}', encoding="utf-8")
+        with patch.object(portable, "MAX_JSON_BYTES", 4), patch.object(portable, "_size", return_value=0):
+            with self.assertRaisesRegex(ValueError, "file-size limit"):
+                portable._json(path)
+
+    def test_export_scans_report_credentials_before_creating_output(self):
+        source = self.work / "source"
+        shutil.copytree(Path(self.core["evidence_path"]).parent, source)
+        report_path = source / "candidate-verification/evidence.json"
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        report["diagnostic"] = {"api_key": "explicit-negative-test-value"}
+        write_json(report_path, report)
+        output = self.work / "rejected-package"
+        with self.assertRaisesRegex(ValueError, "credential field"):
+            export_evidence(source / "evidence.json", output)
+        self.assertFalse(output.exists())
+
+    def test_sqlite_credentials_and_unexpected_payload_tables_are_rejected(self):
+        package = self.copy_package()
+        snapshot = package / "artifacts/safe-repair.sqlite3"
+        with closing(sqlite3.connect(snapshot)) as db, db:
+            db.execute("ALTER TABLE sandbox_state ADD COLUMN diagnostic TEXT")
+            db.execute("UPDATE sandbox_state SET diagnostic=?", (json.dumps({"access_token": "explicit-negative-test-value"}),))
+        reseal_package(package, update_evidence=False)
+        with self.assertRaisesRegex(ValueError, "credential field"):
+            verify_evidence(package)
+        with closing(sqlite3.connect(snapshot)) as db, db:
+            db.execute("CREATE TABLE unrelated_payload (value TEXT)")
+        reseal_package(package, update_evidence=False)
+        with self.assertRaisesRegex(ValueError, "SQLite table set"):
+            verify_evidence(package)
+
+    def test_secret_patterns_are_rejected_and_privacy_counts_never_echo_values(self):
+        from apps.control.sentinel.evidence.portable import _no_credentials
+        for value in ("sk-" + "X" * 30, "LLM_" + "X" * 30,
+                      "Bearer " + "X" * 30, "-----BEGIN PRIVATE KEY-----",
+                      "MODEL_API_KEY=" + "X" * 30):
+            with self.subTest(kind=value[:7]):
+                with self.assertRaisesRegex(ValueError, "credential") as error:
+                    _no_credentials({"diagnostic": value})
+                self.assertNotIn(value, str(error.exception))
+        review = _no_credentials({"historical_path": "C:/Users/Private Person/run/evidence.json",
+                                  "contact": "reviewer@example.test"})
+        self.assertEqual(review, {"absolute_path_values": 1, "email_values": 1})
+        self.assertNotIn("Private Person", json.dumps(review))
+        for key in ("apiKey", "X-API-Key", "client_secret"):
+            with self.subTest(field=key):
+                with self.assertRaisesRegex(ValueError, "credential field"):
+                    _no_credentials({key: "explicit-negative-test-value"})
+
+    def test_export_records_explicit_retention_and_privacy_limits_without_redaction(self):
+        manifest = json.loads((self.core_package / "manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["retention_policy"], {"published_evidence": "retain_indefinitely",
+                         "automatic_deletion": False, "local_artifact_review_after_days": 30})
+        self.assertGreater(manifest["privacy_review"]["absolute_path_values"], 0)
+        self.assertEqual(manifest["privacy_review"]["source_history_review"], "REQUIRED")
+        result = verify_evidence(self.core_package)
+        self.assertEqual(result["privacy_review"], manifest["privacy_review"])
+        self.assertEqual(result["resource_limits"]["files"], 1024)
+
+    def test_optional_promotion_request_is_bound_to_verified_context(self):
+        source = self.work / "idempotent-source"
+        shutil.copytree(Path(self.core["evidence_path"]).parent, source)
+        data = json.loads((source / "evidence.json").read_text(encoding="utf-8"))
+        fingerprint = digest({"candidate": data["candidate"]["patch"], "initial": data["initial_state_hash"],
+                              "task": data["task"], "proposals": data["original_proposals"],
+                              "evidence_kind": data["evidence_kind"]})
+        with closing(sqlite3.connect(source / "policies.sqlite3")) as db, db:
+            db.execute("CREATE TABLE promotion_requests (request_key TEXT PRIMARY KEY, request_hash TEXT NOT NULL, receipt TEXT NOT NULL)")
+            db.execute("INSERT INTO promotion_requests VALUES (?, ?, ?)",
+                       ("repair-recorded-run", fingerprint, json.dumps(data["candidate"]["receipt"])))
+        package = self.work / "idempotent-package"
+        export_evidence(source / "evidence.json", package)
+        self.assertEqual(verify_evidence(package)["status"], "VERIFIED")
+        with closing(sqlite3.connect(package / "artifacts/policies.sqlite3")) as db, db:
+            db.execute("UPDATE promotion_requests SET request_hash=?", ("0" * 64,))
+        reseal_package(package, update_evidence=False)
+        with self.assertRaisesRegex(ValueError, "promotion request context mismatch"):
+            verify_evidence(package)
 
 
 if __name__ == "__main__":

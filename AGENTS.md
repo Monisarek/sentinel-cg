@@ -30,6 +30,9 @@
 
 ## Implementation order
 
+- The active production-hardening request authorizes targeted security/recovery changes and three structurally different deterministic evaluation scenarios. Preserve historical gates and evidence. Work on a dedicated `codex/` branch based on PR #2 until review; do not duplicate its CI/read-only changes.
+- Do not start live Codex or Meta inference during hardening. Any new real-inference validation requires explicit owner approval for that run. Offline subprocess tests use Python children, never model calls.
+- Keep portfolio readiness separate from production deployment readiness. Record actual outcomes and unresolved OS-identity/network isolation in `docs/PRODUCTION_READINESS.md`; CLI flags are not an OS security boundary.
 - The current deliverable is a locally reproducible offline portfolio demo. Keep competition gates and historical evidence separate from portfolio acceptance. Use no live inference or paid services for portfolio work.
 - Make targeted usability and reliability fixes to the existing workspace. Publish checked portfolio changes to `build`. Merging into `main` or creating a final release tag requires separate owner approval.
 

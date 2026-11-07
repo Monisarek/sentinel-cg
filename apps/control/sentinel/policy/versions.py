@@ -1,10 +1,11 @@
 """Append-only policy versions; activation is owned by deterministic verification."""
 
-from contextlib import ExitStack, closing, contextmanager
+from contextlib import ExitStack, closing, contextmanager, nullcontext
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
 from pathlib import Path
+import re
 import sqlite3
 
 from apps.control.sentinel.evaluation.promotion import evaluate_candidate, frozen_suite_hashes
@@ -12,6 +13,11 @@ from apps.control.sentinel.gateway import Gateway
 from apps.control.sentinel.policy import evaluate_v0
 from apps.control.sentinel.policy.dsl import CandidatePolicyPatch, OverlayPolicy, validate_patch
 from apps.sandbox.state import SandboxState, TaskContract, state_hash
+
+
+def _set_promotion_lock_wait(db, remaining=None):
+    seconds = min(30, max(0, remaining)) if type(remaining) in (int, float) else 30
+    db.execute(f"PRAGMA busy_timeout = {int(seconds * 1000)}")
 
 
 def canonical(data) -> str:
@@ -112,9 +118,37 @@ class PolicyRegistry:
     def consider(self, candidate, initial: SandboxState, task: TaskContract,
                  original_proposals: list[dict], output_root: Path, *,
                  input_evidence_kind: str = "deterministic_test_fixture", check_budget=None,
-                 artifact_root: Path | None = None) -> dict:
+                 artifact_root: Path | None = None, idempotency_key: str | None = None) -> dict:
         """Evaluate a candidate internally; no API accepts a caller-supplied PASS."""
-        with closing(self._connect()) as db:
+        options = {"input_evidence_kind": input_evidence_kind, "check_budget": check_budget,
+                   "artifact_root": artifact_root}
+        if idempotency_key is None:
+            return self._consider(candidate, initial, task, original_proposals, output_root, **options)
+        if type(idempotency_key) is not str or re.fullmatch(r"[A-Za-z0-9_-]{1,128}", idempotency_key) is None:
+            raise ValueError("promotion idempotency key must be a bounded opaque identifier")
+        request_hash = digest({"candidate": candidate.to_dict() if type(candidate) is CandidatePolicyPatch else candidate,
+                               "initial": state_hash(initial), "task": asdict(task),
+                               "proposals": original_proposals, "evidence_kind": input_evidence_kind})
+        with closing(self._connect()) as db, db:
+            # Hold one SQLite transaction across verification and its receipt, including process crashes.
+            _set_promotion_lock_wait(db, check_budget() if check_budget is not None else None)
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("CREATE TABLE IF NOT EXISTS promotion_requests (request_key TEXT PRIMARY KEY, request_hash TEXT NOT NULL, receipt TEXT NOT NULL)")
+            for operation in ("UPDATE", "DELETE"):
+                db.execute(f"CREATE TRIGGER IF NOT EXISTS immutable_promotion_requests_{operation.lower()} BEFORE {operation} ON promotion_requests BEGIN SELECT RAISE(ABORT, 'policy records are immutable'); END")
+            self._version(db)
+            existing = db.execute("SELECT request_hash, receipt FROM promotion_requests WHERE request_key=?", (idempotency_key,)).fetchone()
+            if existing:
+                if existing[0] != request_hash:
+                    raise ValueError("promotion idempotency key belongs to a different request")
+                return json.loads(existing[1])
+            receipt = self._consider(candidate, initial, task, original_proposals, output_root, _db=db, **options)
+            db.execute("INSERT INTO promotion_requests VALUES (?, ?, ?)", (idempotency_key, request_hash, canonical(receipt)))
+            return receipt
+
+    def _consider(self, candidate, initial, task, original_proposals, output_root, *,
+                  input_evidence_kind, check_budget, artifact_root, _db=None):
+        with (nullcontext(_db) if _db is not None else closing(self._connect())) as db:
             context, before = self._context(db), self._version(db)
         report, patch, reason, category = None, None, "verification_failed", None
         error_category = None
@@ -147,8 +181,9 @@ class PolicyRegistry:
                    "verification_path": artifact_path if report else None,
                    "frozen_suite_hashes": context["frozen_suite_hashes"],
                    "active_version": before.version_id, "policy_hash": before.policy_hash}
-        with closing(self._connect()) as db, db:
-            db.execute("BEGIN IMMEDIATE")
+        with (nullcontext(_db) if _db is not None else closing(self._connect())) as db, (nullcontext() if _db is not None else db):
+            if _db is None:
+                db.execute("BEGIN IMMEDIATE")
             current = self._version(db)
             if current.policy_hash != before.policy_hash:
                 passed, receipt["reason"] = False, "active_policy_changed_during_verification"
@@ -157,7 +192,9 @@ class PolicyRegistry:
             receipt.update(active_version=current.version_id, policy_hash=current.policy_hash)
             if passed and check_budget is not None:
                 try:
-                    check_budget()
+                    remaining = check_budget()
+                    if _db is not None:
+                        _set_promotion_lock_wait(db, remaining)
                 except Exception as error:
                     passed, receipt["reason"] = False, "promotion_budget_check_failed"
                     receipt["error_type"] = type(error).__name__
@@ -186,7 +223,7 @@ class VersionedGateway:
                 version = locks.enter_context(self.registry.locked_active())
                 gateway = Gateway(self.sandbox, self.task, policy=version.evaluator(), policy_id=version.version_id,
                                   policy_hash=version.policy_hash)
-            except (sqlite3.Error, ValueError):
+            except Exception:
                 def unavailable(*args):
                     raise RuntimeError("active policy integrity could not be verified")
                 gateway = Gateway(self.sandbox, self.task, policy=unavailable, policy_id="unavailable")

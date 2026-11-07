@@ -4,6 +4,7 @@ import argparse
 from dataclasses import asdict
 import json
 from pathlib import Path
+import re
 import subprocess
 from uuid import uuid4
 
@@ -29,8 +30,10 @@ def _verification(receipt, directory):
     return {key: data[key] for key in ("status", "checks", "case_counts", "measured_counts", "frozen_suite_hashes")}
 
 
-def prove_core(output_root: Path, *, relative_paths: bool = False) -> dict:
-    run_id = "deterministic-core-" + uuid4().hex
+def prove_core(output_root: Path, *, relative_paths: bool = False, run_id: str | None = None) -> dict:
+    run_id = run_id or "deterministic-core-" + uuid4().hex
+    if not re.fullmatch(r"deterministic-core-[0-9a-f]{32}", run_id):
+        raise ValueError("Invalid deterministic execution identifier")
     directory = Path(output_root) / run_id
     directory.mkdir(parents=True)
     artifact_root = directory if relative_paths else None

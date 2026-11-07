@@ -1,12 +1,13 @@
 """Explicit ChatGPT-subscription execution through the official Codex CLI."""
 
 import subprocess
-import os
-import re
 from copy import deepcopy
+from hashlib import sha256
+import json
 
 from apps.control.sentinel.agents.codex import CodexStructuredClient, CodexAgentDriver
 from apps.control.sentinel.agents.contracts import ProviderBlocked, ProviderTransportError
+from apps.control.sentinel.agents.process import bounded_run, MAX_INPUT_BYTES
 
 
 class CodexSubscriptionClient(CodexStructuredClient):
@@ -16,7 +17,12 @@ class CodexSubscriptionClient(CodexStructuredClient):
         self.budget_role = budget_role or role
 
     def complete(self, prompt, schema):
-        self.diagnostics.append({"request": {"prompt": prompt, "schema": schema}})
+        if len(prompt.encode("utf-8")) > MAX_INPUT_BYTES:
+            from apps.control.sentinel.agents.process import ResourceLimit
+            raise ResourceLimit("Codex prompt exceeds the resource limit")
+        self.diagnostics.append({"request": {"prompt_hash": sha256(prompt.encode("utf-8")).hexdigest(),
+                                            "prompt_bytes": len(prompt.encode("utf-8")),
+                                            "schema_hash": sha256(json.dumps(schema, sort_keys=True).encode()).hexdigest()}})
         return super().complete(prompt, schema)
 
     def _run_cli(self, command, **options):
@@ -26,8 +32,11 @@ class CodexSubscriptionClient(CodexStructuredClient):
         environment = options["env"]
         environment.pop("OPENAI_API_KEY", None)
         environment.pop("CODEX_API_KEY", None)
-        auth = subprocess.run([self.executable, "login", "status"], env=environment,
-                              capture_output=True, text=True, timeout=15,
+        control = getattr(self.budget, "control", None)
+        check = control.check if control is not None else None
+        auth = bounded_run([self.executable, "login", "status"], env=environment,
+                              capture_output=True, text=True, timeout=min(15, self.budget.remaining_seconds(self.budget_role)),
+                              check_cancel=check,
                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         if auth.returncode or "Logged in using ChatGPT" not in auth.stdout + auth.stderr:
             raise ProviderBlocked("Codex must be signed in with ChatGPT subscription access")
@@ -36,17 +45,14 @@ class CodexSubscriptionClient(CodexStructuredClient):
             command[-1:-1] = ["--disable", feature]
         options["timeout"] = min(self.timeout_seconds, self.budget.remaining_seconds(self.budget_role))
         try:
-            result = subprocess.run(command, **options,
+            result = bounded_run(command, **options, check_cancel=check,
                                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except subprocess.TimeoutExpired:
             raise ProviderTransportError("Codex subscription request exceeded the experiment deadline") from None
         self.budget.remaining_seconds(self.budget_role)
         if result.returncode and not result.stdout.strip():
-            message = result.stderr.replace(str(options["cwd"]), "<request-directory>")
-            if os.environ.get("USERPROFILE"):
-                message = message.replace(os.environ["USERPROFILE"], "<user-home>")
-            message = re.sub(r"(?:LLM[_|]|sk-|ghp_)[A-Za-z0-9_|.-]+", "<redacted>", message)
-            self.diagnostics.append({"error_category": "CLI_EXECUTION_ERROR", "message": message[:2000]})
+            self.diagnostics.append({"error_category": "CLI_EXECUTION_ERROR", "return_code": result.returncode,
+                                     "message": "Codex stopped before structured events; raw stderr is not retained"})
             raise ProviderTransportError("Codex CLI stopped before producing structured events")
         return result
 
