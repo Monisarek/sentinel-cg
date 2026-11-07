@@ -95,7 +95,10 @@ never resumed or automatically re-issued to the provider. Cancellation requests
 persist separately and are checked before model calls and Gateway commits; the
 subprocess supervisor polls them during authentication and inference.
 
-SQLite operations have bounded busy timeouts; cancellation during deterministic
+SQLite operations have bounded busy timeouts. An idempotent promotion waits up to
+30 seconds for the registry write lock, capped by the remaining stage budget.
+The promotion gate refreshes that cap before activation and commit.
+Cancellation during deterministic
 verification takes effect at its next budget/commit boundary. It is cooperative,
 not instantaneous. A cancelled lifecycle cannot serve a bundle as PASS. Explicit
 new requests are distinct experiments; ambiguous retries must reuse the same
@@ -180,6 +183,13 @@ an inline Event was garbage-collected before a spawned child rebuilt its POSIX
 semaphore. Keeping the parent reference until child completion fixed it. No OS,
 Python version, test or acceptance criterion was removed. The failed run remains
 [visible](https://github.com/Monisarek/sentinel-cg/actions/runs/42268950129).
+
+A later [Windows CI run](https://github.com/Monisarek/sentinel-cg/actions/runs/42270161587)
+exposed a promotion receipt race. Independent verification held the write lock
+past SQLite's default five-second wait, so the second process received a lock
+error. The regression now holds the transaction for six seconds before
+verification and checks that both processes receive the same durable receipt
+with a single activation. The longer wait applies only to idempotent promotion.
 
 From the repository root, with Python dependencies installed:
 

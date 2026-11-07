@@ -15,6 +15,11 @@ from apps.control.sentinel.policy.dsl import CandidatePolicyPatch, OverlayPolicy
 from apps.sandbox.state import SandboxState, TaskContract, state_hash
 
 
+def _set_promotion_lock_wait(db, remaining=None):
+    seconds = min(30, max(0, remaining)) if type(remaining) in (int, float) else 30
+    db.execute(f"PRAGMA busy_timeout = {int(seconds * 1000)}")
+
+
 def canonical(data) -> str:
     return json.dumps(data, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
@@ -126,6 +131,7 @@ class PolicyRegistry:
                                "proposals": original_proposals, "evidence_kind": input_evidence_kind})
         with closing(self._connect()) as db, db:
             # Hold one SQLite transaction across verification and its receipt, including process crashes.
+            _set_promotion_lock_wait(db, check_budget() if check_budget is not None else None)
             db.execute("BEGIN IMMEDIATE")
             db.execute("CREATE TABLE IF NOT EXISTS promotion_requests (request_key TEXT PRIMARY KEY, request_hash TEXT NOT NULL, receipt TEXT NOT NULL)")
             for operation in ("UPDATE", "DELETE"):
@@ -186,7 +192,9 @@ class PolicyRegistry:
             receipt.update(active_version=current.version_id, policy_hash=current.policy_hash)
             if passed and check_budget is not None:
                 try:
-                    check_budget()
+                    remaining = check_budget()
+                    if _db is not None:
+                        _set_promotion_lock_wait(db, remaining)
                 except Exception as error:
                     passed, receipt["reason"] = False, "promotion_budget_check_failed"
                     receipt["error_type"] = type(error).__name__

@@ -8,10 +8,12 @@ import os
 from pathlib import Path
 import sqlite3
 from tempfile import TemporaryDirectory
+import time
 import unittest
 from unittest.mock import patch
 
 from apps.control.sentinel.gateway import Gateway, MAX_PROPOSAL_BYTES
+from apps.control.sentinel.evaluation.promotion import evaluate_candidate
 from apps.control.sentinel.policy.versions import PolicyRegistry
 from apps.sandbox.fixtures import load_fixture
 from apps.sandbox.state.store import Sandbox
@@ -43,13 +45,30 @@ def _gateway_worker(path, ready, start, result):
 
 def _promotion_worker(path, output, request_key, ready, start, result):
     initial, task = load_fixture()
-    ready.put(True)
-    if not start.wait(10):
-        raise RuntimeError("process start barrier timed out")
-    receipt = PolicyRegistry(Path(path)).consider(
-        _candidate(), initial, task, _proposals(task), Path(output), idempotency_key=request_key,
-    )
-    result.put(receipt)
+    registry = PolicyRegistry(Path(path))
+    connect = registry._connect
+
+    def synchronized_connection():
+        db = connect()
+        ready.put(True)
+        if not start.wait(10):
+            db.close()
+            raise RuntimeError("process start barrier timed out")
+        return db
+
+    def slow_verification(*args, **kwargs):
+        # Keep the write transaction open beyond SQLite's default five-second wait.
+        time.sleep(6)
+        return evaluate_candidate(*args, **kwargs)
+
+    with patch.object(registry, "_connect", side_effect=synchronized_connection), \
+         patch("apps.control.sentinel.policy.versions.evaluate_candidate", side_effect=slow_verification):
+        try:
+            result.put(registry.consider(
+                _candidate(), initial, task, _proposals(task), Path(output), idempotency_key=request_key,
+            ))
+        except sqlite3.Error as error:
+            result.put({"sqlite_error": str(error)})
 
 
 def _crash_after_sandbox_update(path):
@@ -182,6 +201,7 @@ class StorageSecurityTests(unittest.TestCase):
         registry = PolicyRegistry.create(self.root / "policies.sqlite3", self.initial, self.task)
         arguments = [(str(registry.path), str(self.root / "candidate"), "one-request")] * 2
         receipts = self.race(_promotion_worker, arguments)
+        self.assertEqual([receipt["sqlite_error"] for receipt in receipts if "sqlite_error" in receipt], [])
         self.assertEqual(receipts[0], receipts[1])
         self.assertTrue(receipts[0]["promoted"])
         with closing(sqlite3.connect(registry.path)) as db:
