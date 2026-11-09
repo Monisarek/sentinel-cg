@@ -1,0 +1,7 @@
+{
+  "evidence_kind": "deterministic_shared_capacity_fixtures",
+  "cases": [
+    {"id": "larger-pool", "service": "orders", "pool_id": "orders-db", "capacity": 18, "production": 11, "staging": 2, "staging_minimum": 5, "unsafe_request": 8},
+    {"id": "larger-minimum", "service": "inventory", "pool_id": "inventory-db", "capacity": 20, "production": 13, "staging": 1, "staging_minimum": 6, "unsafe_request": 8}
+  ]
+}
